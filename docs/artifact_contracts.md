@@ -19,17 +19,15 @@ and an installed wheel. This document explains their intended use.
 
 ## Current implementation boundary
 
-The first M1 implementation slice provides strict JSON/NPZ I/O, all version-1
-structural schemas, scientific-content hashing, file-reference/checksum
-verification, and full semantic validators for motion protocols and normalized
-trajectories. The acquisition, split, parameter, fit-result, and dataset
-schemas are structural contracts in this slice.
+M1a provides strict JSON/NPZ I/O, versioned structural schemas,
+scientific-content hashing, file-reference validation, and full semantic
+validators for motion protocols and normalized trajectories. M1b now also
+provides deterministic bundle sealing plus intrinsic validation of acquisition
+runs, split assignments, identified parameters, and fit results.
 
-Complete sealed-bundle finalization, semantic validation across those remaining
-artifact types, split-overlap enforcement, the example dataset, and the
-dataset-validation command are the next M1 slice. Passing the current
-checksum-manifest helper therefore proves the listed files, but does not by
-itself certify a complete sealed bundle.
+Resolving complete datasets across artifact boundaries, proving the selected
+torque channel is fit-eligible, the compact simulation dataset, and the
+dataset-validation command remain in M1b.
 
 ## Formats
 
@@ -115,10 +113,11 @@ is finalized with the player in M3; it is not inferred by the M1a validator.
 Fit, development, and held-out roles do not belong to a protocol. They belong
 to a versioned dataset split.
 
-A protocol-validation certificate is a separate future artifact keyed by the
-protocol, model, scene, payload, and constraint-profile digests. A motion that
-was checked in one environment is not implicitly certified in every
-environment.
+A future machine-generated simulation record will bind the protocol to the
+model, scene, payload, and constraint-profile digests that were checked. The
+normal command-line workflow will create and consume this record automatically;
+the operator will not manage it manually. A motion checked in one environment
+is not implicitly valid in every environment.
 
 ## 2. Acquisition run
 
@@ -141,7 +140,7 @@ local by default and is published only through an explicit curation step.
 
 The run manifest pins:
 
-- the exact compiled protocol and validation-certificate digests;
+- the exact compiled protocol and simulation-validation digests;
 - backend: standalone MuJoCo, ROS MuJoCo, or Agimus FER;
 - source model, robot, hand, payload, controller, software and container
   revisions;
@@ -345,13 +344,17 @@ network addresses, and unrelated ROS traffic are not public metadata.
 
 Artifact identifiers are readable names, not self-referential hashes.
 
-The target sealed-bundle contract uses `checksums.sha256` to list the SHA-256
-digest of each bundle file in sorted POSIX-relative path order, excluding
-itself and `seal.json`. `seal.json` records the digest of the checksum
-manifest. The M1a verifier checks every listed file and rejects malformed,
-unsorted, duplicate, escaping, or mismatched entries. Exact file-set closure
-and `seal.json` verification are deliberately reserved for the M1b
-finalizer/verifier; until then, an artifact is not considered sealed.
+The sealed-bundle contract uses `checksums.sha256` to list the SHA-256 digest
+of each bundle file in sorted POSIX-relative path order, excluding itself and
+`seal.json`. `seal.json` records the digest of the checksum manifest.
+
+`finalize_bundle` writes each control file atomically, refuses to overwrite an
+existing seal, and is intended to run inside a staging directory before that
+directory is published. `verify_sealed_bundle` validates the packaged seal
+schema, canonical checksum-manifest bytes, every payload digest, the exact
+regular-file set, and the absence of symlinks or special files. The older
+`verify_checksum_manifest` helper intentionally verifies listed entries only;
+it does not certify sealing.
 
 A scientific content fingerprint is separate from byte-level bundle
 integrity. Version 1 hashes canonical manifest metadata and each array's key,

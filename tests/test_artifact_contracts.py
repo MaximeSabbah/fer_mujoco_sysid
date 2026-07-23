@@ -34,6 +34,7 @@ _SCHEMA_ARTIFACTS = {
     "identified-parameters",
     "motion-protocol",
     "normalized-trajectory",
+    "seal",
     "splits",
 }
 
@@ -598,6 +599,18 @@ def test_motion_rejects_wrong_unit_actionably(tmp_path: Path) -> None:
     with pytest.raises(
         ArtifactValidationError,
         match=r"arrays\.desired_velocity\.unit",
+    ):
+        validate_motion_protocol(manifest, arrays, root=root)
+
+
+def test_effort_protocol_requires_compiled_effort_array(tmp_path: Path) -> None:
+    root = tmp_path / "motion"
+    manifest, arrays = _motion_bundle(root)
+    manifest["command_interface"] = "joint_effort"
+
+    with pytest.raises(
+        ArtifactValidationError,
+        match=r"joint_effort.*desired_effort_feedforward",
     ):
         validate_motion_protocol(manifest, arrays, root=root)
 

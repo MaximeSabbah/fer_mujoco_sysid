@@ -11,7 +11,6 @@
     "ended_at_utc",
     "backend",
     "protocol",
-    "protocol_validation",
     "joint_order",
     "robot",
     "controller",

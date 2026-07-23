@@ -1,5 +1,12 @@
 """Portable, pickle-free artifact I/O and semantic validation."""
 
+from fer_mujoco_sysid.artifacts.bundle import (
+    CHECKSUM_MANIFEST_NAME,
+    SEAL_NAME,
+    SEAL_SCHEMA,
+    finalize_bundle,
+    verify_sealed_bundle,
+)
 from fer_mujoco_sysid.artifacts.content import content_sha256
 from fer_mujoco_sysid.artifacts.errors import ArtifactValidationError
 from fer_mujoco_sysid.artifacts.io import (
@@ -24,10 +31,14 @@ from fer_mujoco_sysid.artifacts.validation import (
 )
 
 __all__ = [
+    "CHECKSUM_MANIFEST_NAME",
     "FER_ARM_JOINT_ORDER",
+    "SEAL_NAME",
+    "SEAL_SCHEMA",
     "ArtifactValidationError",
     "JsonValue",
     "content_sha256",
+    "finalize_bundle",
     "load_checksum_manifest",
     "load_json",
     "load_numeric_npz",
@@ -39,5 +50,6 @@ __all__ = [
     "validate_normalized_trajectory",
     "validate_schema",
     "verify_checksum_manifest",
+    "verify_sealed_bundle",
     "write_json",
 ]

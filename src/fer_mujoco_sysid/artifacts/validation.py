@@ -413,6 +413,13 @@ def validate_motion_protocol(
                 f"arrays.{logical_name}.key must be {expected_key!r}, "
                 f"got {reference.get('key')!r}"
             )
+    if (
+        manifest.get("command_interface") == "joint_effort"
+        and "desired_effort_feedforward" not in array_manifest
+    ):
+        raise _error(
+            "joint_effort motion protocols require arrays.desired_effort_feedforward"
+        )
 
     references = _numeric_references(manifest, artifact="motion-protocol")
     archive_relative = _validate_array_references(references, arrays, verified)

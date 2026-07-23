@@ -134,6 +134,9 @@ from it; they are never fitted independently.
   dynamic inertial parameters are released.
 - Playback does not stream time-critical commands from an ordinary Python
   sleep loop. The real robot uses an Agimus-compatible ROS 2 controller.
+- Standalone and ROS playback consume the same compiled motion arrays and an
+  explicitly fixed interpolation policy. Backend adapters may map names and
+  transport, but they do not regenerate the trajectory.
 - Recording and plotting must not add work to the robot's real-time control
   path.
 - No external controller or ROS repository is modified without a separately
@@ -241,10 +244,11 @@ Approve the schemas and storage formats before implementing the fitting core.
   JSON/pickle-free NPZ utilities, deterministic content hashes, semantic
   validation for motion and normalized trajectories, and a MuJoCo 3.10
   public-API compatibility test.
-- **M1b — complete artifact workflow:** sealed-bundle finalization and
-  verification, semantic validators across acquisition/dataset/splits/results,
-  cross-artifact torque-input eligibility, committed example data, and the
-  standalone dataset-validation command.
+- **M1b — complete artifact workflow (in progress):** sealed-bundle
+  finalization, verification, and intrinsic manifest validators are
+  implemented; dataset-wide reference checks, cross-artifact torque-input
+  eligibility, committed example data, and the standalone validation command
+  remain.
 
 ## M2 — Parameterization and synthetic unit recovery
 
@@ -345,7 +349,9 @@ unchanged.
 - Separate train and validation campaigns.
 - Validation across a bounded ensemble of plausible dynamic models, not only
   the nominal model.
-- A machine-readable validation certificate tied to the protocol hash.
+- A machine-generated simulation-validation record tied to the protocol hash.
+- Full plant-scene hashes and a fixed interpolation rule shared by standalone
+  MuJoCo and the ROS trajectory controller.
 
 ### Exit gate
 
@@ -423,14 +429,22 @@ conversion while using the existing FER MuJoCo plant.
 - Standard ROS 2 trajectory action playback rather than Python-rate streaming.
 - One complete `FollowJointTrajectory` goal per protocol, leaving interpolation
   to the real-time controller.
+- A dedicated effort-mode trajectory controller and launch path in this
+  repository; the MPPI bridge and linear-feedback controller are not part of
+  identification playback.
 - One protocol description shared with standalone simulation.
 - Recording to MCAP as the immutable source.
 - Controller reference, measured state, actual/desired effort, robot state,
   diagnostics, timing, and action status where available.
 - A converter that produces the same normalized dataset contract as M4.
 - Automatic post-run validation and report generation.
+- Separate controller-output and MuJoCo realized-actuator signals; neither is
+  inferred from the other.
 - A self-contained asset path for the ROS MJCF before the deprecated checkout
   can be removed.
+- A cross-version rollout gate covering the sysid, Hydrax, and ROS MuJoCo
+  runtimes. Numerical parity is not claimed while their versions differ
+  without evidence.
 - No modification of Hydrax or `sbmpc_ros` during this milestone.
 
 ### Exit gate
@@ -439,6 +453,10 @@ conversion while using the existing FER MuJoCo plant.
   cancellation, and failure behavior.
 - Required topics exist at expected rates and have nonzero counts.
 - Joint ordering and torque semantics agree with the standalone dataset.
+- The same protocol knots and interpolation contract are demonstrated in both
+  simulation paths.
+- Cross-version rollout differences are below predeclared tolerances, or all
+  three runtimes use the same accepted MuJoCo version.
 - No recording or reporting work executes in the real-time controller path.
 - Fitting the ROS-simulation dataset recovers the hidden simulation parameters
   and passes the same held-out gates as M4.
@@ -471,6 +489,8 @@ Agimus hardware architecture.
 - Explicit hold/cancel/failure behavior.
 - Comprehensive recording without blocking the real-time loop.
 - Simulation mode exercising the exact player and recorder code.
+- Hardware mode changes only the backend launch, controller endpoint, and
+  Agimus-specific signal mapping; it does not regenerate the protocol.
 
 ### Exit gate
 
@@ -732,6 +752,8 @@ The following are failures even if an optimizer returns `success`:
 | D012 | 2026-07-23 | Use strict JSON metadata plus safe numeric NPZ as the portable artifact boundary; adapt these artifacts to public MuJoCo sysid containers in memory. |
 | D013 | 2026-07-23 | Use `fer_joint1` through `fer_joint7` as the canonical portable joint order and map Hydrax names at the adapter boundary. |
 | D014 | 2026-07-23 | Keep reusable compiled motions in `protocols/`; keep per-robot recordings external by default and publish datasets only through deliberate curation. |
+| D015 | 2026-07-23 | Use a dedicated effort-mode ROS trajectory-controller path in this repository; do not use the MPPI/LFC command path for identification playback. |
+| D016 | 2026-07-23 | Treat MuJoCo 3.10/3.8/3.4 runtime skew as an explicit simulation gate before claiming standalone, ROS, and robot-ready parity. |
 
 ## Open decisions
 

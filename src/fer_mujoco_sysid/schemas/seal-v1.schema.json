@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fer-mujoco-sysid:schema:seal:1",
+  "title": "Deterministic sealed-bundle integrity root",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "checksum_manifest",
+    "checksum_manifest_sha256"
+  ],
+  "properties": {
+    "schema": {
+      "const": "fer-mujoco-sysid/seal@1"
+    },
+    "checksum_manifest": {
+      "const": "checksums.sha256"
+    },
+    "checksum_manifest_sha256": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/sha256"
+    }
+  }
+}

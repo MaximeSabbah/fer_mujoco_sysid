@@ -982,6 +982,7 @@
         "nominal_value",
         "initial_value",
         "bounds",
+        "bound_status",
         "identifiability_status",
         "export_policy"
       ],
@@ -1018,6 +1019,15 @@
             }
           }
         },
+        "bound_status": {
+          "type": "string",
+          "enum": [
+            "none",
+            "lower",
+            "upper",
+            "both"
+          ]
+        },
         "identifiability_status": {
           "type": "string",
           "enum": [
@@ -1036,35 +1046,50 @@
           ]
         },
         "uncertainty": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "method",
-            "confidence_level",
-            "lower",
-            "upper"
-          ],
-          "properties": {
-            "method": {
-              "type": "string",
-              "enum": [
-                "local_jacobian",
-                "trajectory_bootstrap",
-                "none"
-              ]
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method"
+              ],
+              "properties": {
+                "method": {
+                  "const": "none"
+                }
+              }
             },
-            "confidence_level": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "exclusiveMaximum": 1
-            },
-            "lower": {
-              "type": "number"
-            },
-            "upper": {
-              "type": "number"
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "confidence_level",
+                "lower",
+                "upper"
+              ],
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "local_jacobian",
+                    "trajectory_bootstrap"
+                  ]
+                },
+                "confidence_level": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "exclusiveMaximum": 1
+                },
+                "lower": {
+                  "type": "number"
+                },
+                "upper": {
+                  "type": "number"
+                }
+              }
             }
-          }
+          ]
         }
       }
     },

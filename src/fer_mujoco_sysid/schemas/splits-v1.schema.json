@@ -182,7 +182,26 @@
           "type": "string",
           "minLength": 1
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "reason_code": {
+                "const": "other"
+              }
+            },
+            "required": [
+              "reason_code"
+            ]
+          },
+          "then": {
+            "required": [
+              "details"
+            ]
+          }
+        }
+      ]
     }
   }
 }

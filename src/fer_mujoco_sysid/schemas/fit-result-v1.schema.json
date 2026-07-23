@@ -12,6 +12,7 @@
     "status",
     "toolchain",
     "inputs",
+    "data_use",
     "forward_model_input",
     "fit_configuration",
     "optimizer_stages",
@@ -141,6 +142,29 @@
               }
             }
           }
+        }
+      }
+    },
+    "data_use": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "optimizer",
+        "model_selection",
+        "final_evaluation"
+      ],
+      "properties": {
+        "optimizer": {
+          "const": "fit"
+        },
+        "model_selection": {
+          "const": [
+            "fit",
+            "development"
+          ]
+        },
+        "final_evaluation": {
+          "const": "held_out_test"
         }
       }
     },
