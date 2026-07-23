@@ -11,6 +11,8 @@
     "ended_at_utc",
     "backend",
     "protocol",
+    "protocol_reference_signals",
+    "protocol_timing",
     "joint_order",
     "robot",
     "controller",
@@ -50,6 +52,31 @@
       "properties": {
         "schema": {
           "const": "fer-mujoco-sysid/motion-protocol@1"
+        }
+      }
+    },
+    "protocol_reference_signals": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/protocolReferenceSignalNames"
+    },
+    "protocol_timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clock_id",
+        "protocol_start_timestamp_ns",
+        "source"
+      ],
+      "properties": {
+        "clock_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocol_start_timestamp_ns": {
+          "type": "string",
+          "pattern": "^-?[0-9]+$"
+        },
+        "source": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/protocolTimingSource"
         }
       }
     },

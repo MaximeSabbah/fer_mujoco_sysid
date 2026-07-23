@@ -12,6 +12,8 @@
     "source_run",
     "protocol",
     "protocol_segment_id",
+    "protocol_sample_interval",
+    "protocol_reference_signals",
     "lineage_group_id",
     "converter",
     "joint_order",
@@ -57,6 +59,27 @@
     "protocol_segment_id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+    },
+    "protocol_sample_interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_index",
+        "end_index_exclusive"
+      ],
+      "properties": {
+        "start_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_index_exclusive": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "protocol_reference_signals": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/protocolReferenceSignalNames"
     },
     "lineage_group_id": {
       "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"

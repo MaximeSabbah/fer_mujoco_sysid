@@ -21,6 +21,11 @@ consistent MuJoCo model that predicts the FER dynamics more accurately.
 The fitting backend is MuJoCo's native `mujoco.sysid` toolbox. The project pins
 the exact MuJoCo version so that datasets and results remain reproducible.
 
+This repository is intended to own the complete workflow, including standalone
+MuJoCo execution, ROS 2 MuJoCo playback and recording, and Agimus FER playback
+and recording. Hydrax and `sbmpc_ros` are downstream model consumers; they are
+not runtime dependencies of the finished identification tool.
+
 The versioned [implementation plan](docs/implementation_plan.md) defines the
 milestones, validation gates, and review checkpoints used to develop the
 project.
@@ -32,11 +37,17 @@ The repository currently provides:
 - a Python 3.12 environment pinned to `mujoco[sysid]==3.10.0`;
 - a reviewed nominal FER model contract;
 - a seven-axis identification-model projection;
-- versioned, pickle-free artifact contracts; and
-- physical-parity, dynamics, provenance, artifact, and sysid API tests.
+- versioned, pickle-free and sealed artifact contracts;
+- fail-closed sealed dataset, protocol-interval, lineage, split, source-model,
+  and torque-semantics validation;
+- a `validate-dataset` command; and
+- a deterministic open-loop MuJoCo effort-plant primitive.
 
-Synthetic parameter recovery, excitation generation, recording adapters, and
-real-data fitting will be added incrementally.
+The current plant primitive deliberately does not claim ROS controller parity:
+the ROS effort trajectory controller adds feedback to effort feedforward.
+The shared controller/interpolation contract, repository-owned FER model
+snapshot, synthetic parameter recovery, excitation generation, recording
+adapters, and real-data fitting will be added incrementally.
 
 ## Protocols and datasets
 
@@ -61,6 +72,7 @@ Python 3.12 and [`uv`](https://docs.astral.sh/uv/) are required.
 ```bash
 uv sync --locked --all-groups
 ./scripts/test
+fer-mujoco-sysid validate-dataset DATASET_ROOT --catalog-root CATALOG_ROOT
 ```
 
 The nominal model provenance and compatibility guarantees are documented in

@@ -86,6 +86,22 @@ def _acquisition_run() -> dict[str, Any]:
             schema="fer-mujoco-sysid/motion-protocol@1",
             path="protocol/protocol.json",
         ),
+        "protocol_reference_signals": {
+            "desired_position": "scheduled_position",
+            "desired_velocity": "scheduled_velocity",
+            "desired_acceleration": "scheduled_acceleration",
+        },
+        "protocol_timing": {
+            "clock_id": "simulation",
+            "protocol_start_timestamp_ns": "0",
+            "source": {
+                "kind": "mujoco",
+                "object_type": "data",
+                "field": "time",
+                "sample_index": 0,
+                "unit": "s",
+            },
+        },
         "joint_order": list(FER_ARM_JOINT_ORDER),
         "robot": {
             "platform": "FER",
@@ -116,17 +132,17 @@ def _acquisition_run() -> dict[str, Any]:
         ],
         "signals": [
             {
-                "name": "measured_position",
+                "name": "scheduled_position",
                 "quantity": "joint_position",
-                "semantic_role": "measured_joint_position",
+                "semantic_role": "desired_joint_position",
                 "unit": "rad",
                 "joint_order": list(FER_ARM_JOINT_ORDER),
                 "positive_direction": "same_as_joint_coordinate",
                 "clock_id": "simulation",
                 "source": {
-                    "kind": "mujoco",
-                    "object_type": "state",
-                    "field": "qpos",
+                    "kind": "protocol_player",
+                    "protocol_artifact_id": "protocol-test",
+                    "field": "q_rad",
                 },
                 "sample_count": 2,
             }

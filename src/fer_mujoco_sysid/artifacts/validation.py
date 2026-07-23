@@ -503,6 +503,14 @@ def validate_normalized_trajectory(
     """Validate one fixed-grid normalized M-transition FER trajectory."""
     _schema_manifest(manifest, "normalized-trajectory", schema_dir)
     _require_canonical_joints(manifest)
+    protocol_interval = _require_mapping(
+        manifest["protocol_sample_interval"],
+        label="protocol_sample_interval",
+    )
+    if protocol_interval["start_index"] >= protocol_interval["end_index_exclusive"]:
+        raise _error(
+            "protocol_sample_interval.start_index must precede end_index_exclusive"
+        )
     _validate_primitive_arrays(arrays)
     _validate_normalized_clocks(manifest)
 
@@ -575,6 +583,43 @@ def validate_normalized_trajectory(
     q_signals = 0
     dq_signals = 0
     control_effort_signals = 0
+    protocol_references = _require_mapping(
+        manifest["protocol_reference_signals"],
+        label="protocol_reference_signals",
+    )
+    protocol_reference_requirements = {
+        "desired_position": (
+            "joint_position",
+            "desired_joint_position",
+            "rad",
+            "state",
+        ),
+        "desired_velocity": (
+            "joint_velocity",
+            "desired_joint_velocity",
+            "rad/s",
+            "state",
+        ),
+        "desired_acceleration": (
+            "joint_acceleration",
+            "desired_joint_acceleration",
+            "rad/s^2",
+            "state",
+        ),
+        "desired_effort_feedforward": (
+            "joint_effort",
+            "desired_effort_feedforward",
+            "N*m",
+            "control",
+        ),
+    }
+    protocol_reference_by_name = {
+        cast(str, name): (logical_name, protocol_reference_requirements[logical_name])
+        for logical_name, name in protocol_references.items()
+    }
+    if len(protocol_reference_by_name) != len(protocol_references):
+        raise _error("protocol_reference_signals must name distinct signals")
+    seen_protocol_references: set[str] = set()
     for index, raw_signal in enumerate(cast(list[Any], manifest["signals"])):
         signal = _require_mapping(raw_signal, label=f"signals[{index}]")
         descriptor = _require_mapping(
@@ -663,6 +708,38 @@ def validate_normalized_trajectory(
             expected_unit = _STATE_QUANTITY_UNITS.get(cast(str, quantity))
             if expected_unit is None or unit != expected_unit:
                 raise _error(f"signals[{index}] has an inconsistent quantity/unit pair")
+        protocol_reference = protocol_reference_by_name.get(signal_name)
+        if protocol_reference is not None:
+            logical_name, expected_semantics = protocol_reference
+            seen_protocol_references.add(logical_name)
+            actual_semantics = (
+                quantity,
+                descriptor.get("semantic_role"),
+                unit,
+                time_base,
+            )
+            if actual_semantics != expected_semantics:
+                raise _error(
+                    f"protocol reference {logical_name!r} requires "
+                    f"quantity/role/unit/time_base {expected_semantics!r}, "
+                    f"got {actual_semantics!r}"
+                )
+            if signal.get("resampling") != {
+                "method": "none",
+                "applied_time_shift_s": 0.0,
+            }:
+                raise _error(
+                    f"protocol reference {logical_name!r} must be natively aligned "
+                    "without a time shift"
+                )
+            if signal.get("numeric_transform") != {
+                "scale": 1.0,
+                "offset": 0.0,
+            }:
+                raise _error(
+                    f"protocol reference {logical_name!r} must use an identity "
+                    "numeric transform"
+                )
 
     if q_signals != 1 or dq_signals != 1:
         raise _error("signals must declare q_rad and dq_rad_s exactly once")
@@ -670,6 +747,11 @@ def validate_normalized_trajectory(
         raise _error(
             "signals must declare at least one joint-effort candidate on the "
             "control time base"
+        )
+    if seen_protocol_references != set(protocol_references):
+        raise _error(
+            "every protocol_reference_signals entry must name exactly one "
+            "normalized signal"
         )
 
     initial_state = _require_mapping(

@@ -7,6 +7,13 @@ from fer_mujoco_sysid.artifacts.bundle import (
     finalize_bundle,
     verify_sealed_bundle,
 )
+from fer_mujoco_sysid.artifacts.catalog import (
+    LocalArtifactResolver,
+    ResolvedArtifact,
+    ValidatedDataset,
+    validate_dataset_bundle,
+    validate_fit_against_dataset,
+)
 from fer_mujoco_sysid.artifacts.content import content_sha256
 from fer_mujoco_sysid.artifacts.errors import ArtifactValidationError
 from fer_mujoco_sysid.artifacts.io import (
@@ -37,6 +44,9 @@ __all__ = [
     "SEAL_SCHEMA",
     "ArtifactValidationError",
     "JsonValue",
+    "LocalArtifactResolver",
+    "ResolvedArtifact",
+    "ValidatedDataset",
     "content_sha256",
     "finalize_bundle",
     "load_checksum_manifest",
@@ -46,6 +56,8 @@ __all__ = [
     "resolve_contained_path",
     "schema_directory",
     "sha256_file",
+    "validate_dataset_bundle",
+    "validate_fit_against_dataset",
     "validate_motion_protocol",
     "validate_normalized_trajectory",
     "validate_schema",

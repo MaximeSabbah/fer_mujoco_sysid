@@ -130,6 +130,32 @@ def _effort_signal() -> dict[str, Any]:
     }
 
 
+def _protocol_reference_signal(
+    *,
+    name: str,
+    quantity: str,
+    semantic_role: str,
+    unit: str,
+    field: str,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "quantity": quantity,
+        "semantic_role": semantic_role,
+        "unit": unit,
+        "joint_order": list(FER_ARM_JOINT_ORDER),
+        "positive_direction": "same_as_joint_coordinate",
+        "clock_id": "ros-clock",
+        "source": {
+            "kind": "ros_message",
+            "topic": "/protocol_reference",
+            "message_type": "fer_mujoco_sysid_msgs/msg/ProtocolReference",
+            "field": field,
+        },
+        "sample_count": 100,
+    }
+
+
 def _acquisition(root: Path) -> dict[str, Any]:
     configuration = _file_reference(root)
     recording = _file_reference(root, "raw/run.mcap")
@@ -143,6 +169,25 @@ def _acquisition(root: Path) -> dict[str, Any]:
             "protocol-fixture",
             "fer-mujoco-sysid/motion-protocol@1",
         ),
+        "protocol_reference_signals": {
+            "desired_position": "scheduled_position",
+            "desired_velocity": "scheduled_velocity",
+            "desired_acceleration": "scheduled_acceleration",
+        },
+        "protocol_timing": {
+            "clock_id": "ros-clock",
+            "protocol_start_timestamp_ns": "0",
+            "source": {
+                "kind": "ros_message",
+                "topic": "/protocol_reference",
+                "message_type": ("fer_mujoco_sysid_msgs/msg/ProtocolReference"),
+                "message_index": 0,
+                "stamp_fields": {
+                    "sec": "header.stamp.sec",
+                    "nanosec": "header.stamp.nanosec",
+                },
+            },
+        },
         "joint_order": list(FER_ARM_JOINT_ORDER),
         "robot": {
             "platform": "FER",
@@ -181,6 +226,27 @@ def _acquisition(root: Path) -> dict[str, Any]:
                 "rad/s",
             ),
             _effort_signal(),
+            _protocol_reference_signal(
+                name="scheduled_position",
+                quantity="joint_position",
+                semantic_role="desired_joint_position",
+                unit="rad",
+                field="q_rad",
+            ),
+            _protocol_reference_signal(
+                name="scheduled_velocity",
+                quantity="joint_velocity",
+                semantic_role="desired_joint_velocity",
+                unit="rad/s",
+                field="dq_rad_s",
+            ),
+            _protocol_reference_signal(
+                name="scheduled_acceleration",
+                quantity="joint_acceleration",
+                semantic_role="desired_joint_acceleration",
+                unit="rad/s^2",
+                field="ddq_rad_s2",
+            ),
         ],
         "recording_files": [recording],
         "recorded_topics": [
@@ -190,10 +256,53 @@ def _acquisition(root: Path) -> dict[str, Any]:
                 "message_count": 100,
                 "required_for_conversion": True,
                 "clock_id": "ros-clock",
-            }
+            },
+            {
+                "topic": "/protocol_reference",
+                "message_type": ("fer_mujoco_sysid_msgs/msg/ProtocolReference"),
+                "message_count": 100,
+                "required_for_conversion": True,
+                "clock_id": "ros-clock",
+            },
         ],
         "software": [{"name": "rosbag2", "version": "0.30.0"}],
         "outcome": {"status": "completed", "reason_code": "completed_normally"},
+    }
+
+
+def _use_standalone_mujoco_sources(manifest: dict[str, Any]) -> None:
+    manifest["backend"] = "standalone_mujoco"
+    for signal, source in zip(
+        manifest["signals"],
+        [
+            {"kind": "mujoco", "object_type": "state", "field": "qpos"},
+            {"kind": "mujoco", "object_type": "state", "field": "qvel"},
+            {"kind": "mujoco", "object_type": "actuator", "field": "force"},
+            {
+                "kind": "protocol_player",
+                "protocol_artifact_id": manifest["protocol"]["artifact_id"],
+                "field": "q_rad",
+            },
+            {
+                "kind": "protocol_player",
+                "protocol_artifact_id": manifest["protocol"]["artifact_id"],
+                "field": "dq_rad_s",
+            },
+            {
+                "kind": "protocol_player",
+                "protocol_artifact_id": manifest["protocol"]["artifact_id"],
+                "field": "ddq_rad_s2",
+            },
+        ],
+        strict=True,
+    ):
+        signal["source"] = source
+    manifest["protocol_timing"]["source"] = {
+        "kind": "mujoco",
+        "object_type": "data",
+        "field": "time",
+        "sample_index": 0,
+        "unit": "s",
     }
 
 
@@ -399,7 +508,11 @@ def _fit_result(root: Path) -> dict[str, Any]:
             "signal_name": "measured_effort",
             "semantic_role": "measured_link_effort",
             "selection_rationale": "Identified link-side generalized effort.",
-            "transformation": configuration,
+            "transformation": {
+                "scale": 1.0,
+                "offset_Nm": 0.0,
+                "time_shift_s": 0.0,
+            },
         },
         "fit_configuration": {
             "parameters": configuration,
@@ -439,6 +552,110 @@ def _fit_result(root: Path) -> dict[str, Any]:
 
 def test_valid_acquisition_run(tmp_path: Path) -> None:
     validate_acquisition_run(_acquisition(tmp_path), root=tmp_path)
+
+
+def test_valid_standalone_acquisition_uses_protocol_player_references(
+    tmp_path: Path,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    _use_standalone_mujoco_sources(manifest)
+
+    validate_acquisition_run(manifest, root=tmp_path)
+
+
+@pytest.mark.parametrize("source_kind", ["ros_message", "protocol_player"])
+def test_acquisition_rejects_wrong_scheduled_position_field(
+    tmp_path: Path,
+    source_kind: str,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    if source_kind == "protocol_player":
+        _use_standalone_mujoco_sources(manifest)
+        manifest["signals"][3]["source"]["field"] = "dq_rad_s"
+    else:
+        manifest["signals"][3]["source"]["field"] = "unrelated_payload"
+
+    with pytest.raises(ArtifactValidationError, match="source field must be"):
+        validate_acquisition_run(manifest, root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("signal_index", "fake_field"),
+    [
+        (3, "desired_q"),
+        (4, "desired_dq"),
+        (5, "desired_ddq"),
+    ],
+)
+def test_standalone_rejects_protocol_reference_from_mujoco_data(
+    tmp_path: Path,
+    signal_index: int,
+    fake_field: str,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    _use_standalone_mujoco_sources(manifest)
+    manifest["signals"][signal_index]["source"] = {
+        "kind": "mujoco",
+        "object_type": "data",
+        "field": fake_field,
+    }
+
+    with pytest.raises(ArtifactValidationError, match="from the protocol player"):
+        validate_acquisition_run(manifest, root=tmp_path)
+
+
+def test_standalone_rejects_scheduled_reference_from_another_protocol(
+    tmp_path: Path,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    _use_standalone_mujoco_sources(manifest)
+    manifest["signals"][3]["source"]["protocol_artifact_id"] = "other-protocol"
+
+    with pytest.raises(ArtifactValidationError, match="different protocol artifact"):
+        validate_acquisition_run(manifest, root=tmp_path)
+
+
+def test_standalone_checks_each_protocol_player_role_field(
+    tmp_path: Path,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    _use_standalone_mujoco_sources(manifest)
+    manifest["signals"][4]["source"]["field"] = "q_rad"
+
+    with pytest.raises(ArtifactValidationError, match="source field must be 'dq_rad_s'"):
+        validate_acquisition_run(manifest, root=tmp_path)
+
+
+def test_ros_rejects_protocol_velocity_from_controller_stream(
+    tmp_path: Path,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    manifest["signals"][4]["source"] = {
+        "kind": "ros_message",
+        "topic": "/joint_states",
+        "message_type": "sensor_msgs/msg/JointState",
+        "field": "velocity",
+    }
+
+    with pytest.raises(ArtifactValidationError, match="desired_velocity.*must share"):
+        validate_acquisition_run(manifest, root=tmp_path)
+
+
+@pytest.mark.parametrize("backend", ["ros_mujoco", "agimus_fer"])
+def test_ros_backends_reject_direct_mujoco_signal_sources(
+    tmp_path: Path,
+    backend: str,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    manifest["backend"] = backend
+    manifest["signals"][0]["source"] = {
+        "kind": "mujoco",
+        "object_type": "state",
+        "field": "qpos",
+    }
+
+    with pytest.raises(ArtifactValidationError, match="permits signal source kinds"):
+        validate_acquisition_run(manifest, root=tmp_path)
 
 
 def test_acquisition_verifies_recursive_file_references(tmp_path: Path) -> None:
@@ -516,6 +733,16 @@ def test_acquisition_rejects_unknown_signal_clock(tmp_path: Path) -> None:
         validate_acquisition_run(manifest, root=tmp_path)
 
 
+def test_acquisition_rejects_unknown_protocol_timing_clock(
+    tmp_path: Path,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    manifest["protocol_timing"]["clock_id"] = "missing-clock"
+
+    with pytest.raises(ArtifactValidationError, match="unknown clock"):
+        validate_acquisition_run(manifest, root=tmp_path)
+
+
 @pytest.mark.parametrize("fault", ["missing_topic", "wrong_type"])
 def test_acquisition_rejects_ros_source_disagreement(
     tmp_path: Path,
@@ -528,6 +755,94 @@ def test_acquisition_rejects_ros_source_disagreement(
     else:
         manifest["signals"][0]["source"]["message_type"] = "example/Wrong"
         match = "disagrees"
+
+    with pytest.raises(ArtifactValidationError, match=match):
+        validate_acquisition_run(manifest, root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("fault", "match"),
+    [
+        ("missing_topic", "not recorded"),
+        ("wrong_type", "disagrees"),
+        ("wrong_clock", "disagrees with recorded topic clock"),
+        ("optional_topic", "must be required for conversion"),
+        ("empty_topic", "no recorded protocol_timing source"),
+    ],
+)
+def test_acquisition_rejects_protocol_timing_source_disagreement(
+    tmp_path: Path,
+    fault: str,
+    match: str,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    timing = manifest["protocol_timing"]
+    topic = manifest["recorded_topics"][1]
+    if fault == "missing_topic":
+        timing["source"]["topic"] = "/not_recorded"
+        for signal in manifest["signals"][3:6]:
+            signal["source"]["topic"] = "/not_recorded"
+    elif fault == "wrong_type":
+        topic["message_type"] = "example/Wrong"
+    elif fault == "wrong_clock":
+        manifest["clock_domains"].append(
+            {
+                "clock_id": "receive-clock",
+                "domain": "steady_receive",
+                "epoch": "recorder start",
+                "tick_unit": "ns",
+                "resolution_ns": 1,
+                "timestamp_source": "steady clock",
+            }
+        )
+        topic["clock_id"] = "receive-clock"
+    elif fault == "optional_topic":
+        topic["required_for_conversion"] = False
+    else:
+        topic["message_count"] = 0
+
+    with pytest.raises(ArtifactValidationError, match=match):
+        validate_acquisition_run(manifest, root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("fault", "match"),
+    [
+        ("unknown_signal", "names an unknown signal"),
+        ("wrong_role", "must name the recorded desired_joint_position"),
+        ("wrong_clock", "clock must equal protocol_timing.clock_id"),
+        ("wrong_stream", "must share the protocol_timing topic"),
+        ("missing_topic_clock", "disagrees with recorded topic clock"),
+    ],
+)
+def test_acquisition_binds_protocol_timing_to_scheduled_reference(
+    tmp_path: Path,
+    fault: str,
+    match: str,
+) -> None:
+    manifest = _acquisition(tmp_path)
+    timing = manifest["protocol_timing"]
+    references = manifest["protocol_reference_signals"]
+    if fault == "unknown_signal":
+        references["desired_position"] = "not_recorded"
+    elif fault == "wrong_role":
+        references["desired_position"] = "measured_position"
+    elif fault == "wrong_clock":
+        manifest["clock_domains"].append(
+            {
+                "clock_id": "other-clock",
+                "domain": "steady_receive",
+                "epoch": "recorder start",
+                "tick_unit": "ns",
+                "resolution_ns": 1,
+                "timestamp_source": "steady clock",
+            }
+        )
+        timing["clock_id"] = "other-clock"
+    elif fault == "wrong_stream":
+        timing["source"]["topic"] = "/joint_states"
+    else:
+        del manifest["recorded_topics"][1]["clock_id"]
 
     with pytest.raises(ArtifactValidationError, match=match):
         validate_acquisition_run(manifest, root=tmp_path)
@@ -597,6 +912,7 @@ def test_acquisition_checks_recorded_topic_consistency(
         ("velocity", "measured_joint_velocity"),
         ("effort", "joint-effort"),
         ("samples", "positive-sample measured"),
+        ("scheduled_reference", "positive-sample protocol reference"),
     ],
 )
 def test_completed_acquisition_requires_core_positive_signals(
@@ -611,6 +927,8 @@ def test_completed_acquisition_requires_core_positive_signals(
         manifest["signals"].pop(1)
     elif fault == "effort":
         manifest["signals"].pop(2)
+    elif fault == "scheduled_reference":
+        manifest["signals"][3]["sample_count"] = 0
     else:
         manifest["signals"][0]["sample_count"] = 0
 

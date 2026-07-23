@@ -196,7 +196,24 @@
           "minLength": 1
         },
         "transformation": {
-          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scale",
+            "offset_Nm",
+            "time_shift_s"
+          ],
+          "properties": {
+            "scale": {
+              "const": 1.0
+            },
+            "offset_Nm": {
+              "const": 0.0
+            },
+            "time_shift_s": {
+              "const": 0.0
+            }
+          }
         }
       }
     },

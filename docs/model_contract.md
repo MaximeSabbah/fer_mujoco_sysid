@@ -93,6 +93,15 @@ This project uses the same projection for arm identification. The integration
 timestep comes from the identification dataset; it is not forced to Hydrax's
 40 ms planning period.
 
+The current `run_open_loop_effort_protocol` helper is deliberately a
+contact-free plant primitive. It recompiles the projection from the exact
+declared source, applies each nonterminal effort-feedforward knot for one
+integration interval, rejects actuator saturation and process-global MuJoCo
+callbacks, and returns the canonical `M + 1` state / `M` control time grid. It
+does not consume desired `q/dq/ddq` after initialization and therefore does not
+claim equivalence with ROS effort trajectory control. That equivalence requires
+the shared interpolation and feedback-controller layer defined in M4/M5.
+
 ## Compatibility gates
 
 Before an identified model can be proposed for integration:

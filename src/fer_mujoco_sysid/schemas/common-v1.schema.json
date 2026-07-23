@@ -649,8 +649,135 @@
               "minLength": 1
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "protocol_artifact_id",
+            "field"
+          ],
+          "properties": {
+            "kind": {
+              "const": "protocol_player"
+            },
+            "protocol_artifact_id": {
+              "$ref": "#/$defs/artifactId"
+            },
+            "field": {
+              "type": "string",
+              "enum": [
+                "q_rad",
+                "dq_rad_s",
+                "ddq_rad_s2",
+                "tau_feedforward_Nm"
+              ]
+            }
+          }
         }
       ]
+    },
+    "protocolTimingSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topic",
+            "message_type",
+            "message_index",
+            "stamp_fields"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ros_message"
+            },
+            "topic": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "message_type": {
+              "const": "fer_mujoco_sysid_msgs/msg/ProtocolReference"
+            },
+            "message_index": {
+              "const": 0
+            },
+            "stamp_fields": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sec",
+                "nanosec"
+              ],
+              "properties": {
+                "sec": {
+                  "const": "header.stamp.sec"
+                },
+                "nanosec": {
+                  "const": "header.stamp.nanosec"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "object_type",
+            "field",
+            "sample_index",
+            "unit"
+          ],
+          "properties": {
+            "kind": {
+              "const": "mujoco"
+            },
+            "object_type": {
+              "const": "data"
+            },
+            "field": {
+              "const": "time"
+            },
+            "sample_index": {
+              "const": 0
+            },
+            "unit": {
+              "const": "s"
+            }
+          }
+        }
+      ]
+    },
+    "protocolReferenceSignalNames": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "desired_position",
+        "desired_velocity",
+        "desired_acceleration"
+      ],
+      "properties": {
+        "desired_position": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "desired_velocity": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "desired_acceleration": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "desired_effort_feedforward": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        }
+      }
     },
     "effortSemantics": {
       "type": "object",
@@ -749,6 +876,7 @@
           "type": "string",
           "enum": [
             "controller_effort_command",
+            "desired_effort_feedforward",
             "hardware_desired_link_effort",
             "measured_link_effort",
             "simulated_actuator_effort",

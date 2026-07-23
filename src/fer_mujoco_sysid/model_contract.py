@@ -87,16 +87,20 @@ def resolve_model_paths(workspace_root: str | Path | None = None) -> ModelPaths:
     return ModelPaths(hydrax=hydrax, ros_overlay=ros_overlay)
 
 
-def build_hydrax_arm_model(
+def build_hydrax_arm_spec(
     model_path: str | Path,
     *,
     timestep: float | None = None,
-) -> mujoco.MjModel:
-    """Build the contact-free seven-axis model used for arm identification.
+    joint_state_sensors: bool = False,
+) -> mujoco.MjSpec:
+    """Configure the contact-free seven-axis spec used for arm identification.
 
-    The projection mirrors Hydrax's planning-model derivation: finger joints
-    and their actuator/coupling are removed, but the hand and finger bodies
-    remain so their rigidly attached inertia is preserved.
+    Same projection as :func:`build_hydrax_arm_model`, returned as an editable
+    spec because the ``mujoco.sysid`` pipeline applies parameter modifiers to a
+    spec before every compile. With ``joint_state_sensors`` the spec also gets
+    one ``jointpos`` and one ``jointvel`` sensor per arm joint (named
+    ``{joint}_pos``/``{joint}_vel``, all positions first), which defines the
+    measured-signal layout of identification datasets.
     """
     if timestep is not None and timestep <= 0.0:
         raise ValueError("timestep must be positive")
@@ -115,7 +119,33 @@ def build_hydrax_arm_model(
     spec.option.disableflags |= mujoco.mjtDisableBit.mjDSBL_CONTACT
     if timestep is not None:
         spec.option.timestep = timestep
-    return spec.compile()
+
+    if joint_state_sensors:
+        for sensor_type, suffix in (
+            (mujoco.mjtSensor.mjSENS_JOINTPOS, "pos"),
+            (mujoco.mjtSensor.mjSENS_JOINTVEL, "vel"),
+        ):
+            for joint_name in HYDRAX_ARM_JOINT_NAMES:
+                sensor = spec.add_sensor()
+                sensor.name = f"{joint_name}_{suffix}"
+                sensor.type = sensor_type
+                sensor.objtype = mujoco.mjtObj.mjOBJ_JOINT
+                sensor.objname = joint_name
+    return spec
+
+
+def build_hydrax_arm_model(
+    model_path: str | Path,
+    *,
+    timestep: float | None = None,
+) -> mujoco.MjModel:
+    """Build the contact-free seven-axis model used for arm identification.
+
+    The projection mirrors Hydrax's planning-model derivation: finger joints
+    and their actuator/coupling are removed, but the hand and finger bodies
+    remain so their rigidly attached inertia is preserved.
+    """
+    return build_hydrax_arm_spec(model_path, timestep=timestep).compile()
 
 
 def load_ros_overlay_model(

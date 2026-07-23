@@ -21,6 +21,23 @@ _ACTIVE_PARTITIONS = (
     "held_out_test",
     "diagnostic_only",
 )
+_BACKEND_SIGNAL_SOURCE_KINDS = {
+    "standalone_mujoco": frozenset({"mujoco", "file", "protocol_player"}),
+    "ros_mujoco": frozenset({"ros_message"}),
+    "agimus_fer": frozenset({"ros_message"}),
+}
+_PROTOCOL_REFERENCE_CONTRACT = {
+    "desired_position": ("desired_joint_position", "q_rad"),
+    "desired_velocity": ("desired_joint_velocity", "dq_rad_s"),
+    "desired_acceleration": ("desired_joint_acceleration", "ddq_rad_s2"),
+    "desired_effort_feedforward": (
+        "desired_effort_feedforward",
+        "tau_feedforward_Nm",
+    ),
+}
+_PROTOCOL_PLAYER_FIELDS = {
+    role: field for role, field in _PROTOCOL_REFERENCE_CONTRACT.values()
+}
 _STATE_ROLE_SEMANTICS = {
     "commanded_joint_position": ("joint_position", "rad"),
     "desired_joint_position": ("joint_position", "rad"),
@@ -146,8 +163,94 @@ def validate_acquisition_run(
     )
     _require_unique([topic["topic"] for topic in topics], label="recorded topic")
     _require_canonical_signal_joints(signals)
+    backend = manifest["backend"]
+    allowed_source_kinds = _BACKEND_SIGNAL_SOURCE_KINDS[backend]
+    protocol_timing = manifest["protocol_timing"]
+    timing_source = protocol_timing["source"]
+    invalid_source_kinds = sorted(
+        {
+            source["kind"]
+            for source in [
+                *(signal["source"] for signal in signals),
+                timing_source,
+            ]
+            if source["kind"] not in allowed_source_kinds
+        }
+    )
+    if invalid_source_kinds:
+        raise ArtifactValidationError(
+            f"backend {backend!r} permits signal source kinds "
+            f"{sorted(allowed_source_kinds)!r}, got "
+            f"{invalid_source_kinds!r}"
+        )
 
     clock_ids = {clock["clock_id"] for clock in clocks}
+    if protocol_timing["clock_id"] not in clock_ids:
+        raise ArtifactValidationError(
+            "protocol_timing.clock_id names an unknown clock: "
+            f"{protocol_timing['clock_id']!r}"
+        )
+    signals_by_name = {signal["name"]: signal for signal in signals}
+    protocol_reference_names = manifest["protocol_reference_signals"]
+    _require_unique(
+        list(protocol_reference_names.values()),
+        label="protocol reference signal name",
+    )
+    for logical_name, reference_signal_name in protocol_reference_names.items():
+        expected_role, expected_field = _PROTOCOL_REFERENCE_CONTRACT[logical_name]
+        reference_signal = signals_by_name.get(reference_signal_name)
+        if reference_signal is None:
+            raise ArtifactValidationError(
+                f"protocol_reference_signals.{logical_name} names an unknown "
+                f"signal: {reference_signal_name!r}"
+            )
+        if reference_signal["semantic_role"] != expected_role:
+            raise ArtifactValidationError(
+                f"protocol_reference_signals.{logical_name} must name the "
+                f"recorded {expected_role} signal"
+            )
+        if (
+            manifest["outcome"]["status"] == "completed"
+            and reference_signal["sample_count"] == 0
+        ):
+            raise ArtifactValidationError(
+                "completed acquisition requires positive-sample protocol "
+                f"reference signal {logical_name!r}"
+            )
+        if reference_signal["clock_id"] != protocol_timing["clock_id"]:
+            raise ArtifactValidationError(
+                f"protocol reference signal {logical_name!r} clock must equal "
+                "protocol_timing.clock_id"
+            )
+        reference_source = reference_signal["source"]
+        if backend == "standalone_mujoco":
+            if reference_source["kind"] != "protocol_player":
+                raise ArtifactValidationError(
+                    f"standalone protocol reference {logical_name!r} must "
+                    "originate from the protocol player"
+                )
+            if (
+                reference_source["protocol_artifact_id"]
+                != manifest["protocol"]["artifact_id"]
+            ):
+                raise ArtifactValidationError(
+                    f"protocol reference {logical_name!r} source names a "
+                    "different protocol artifact"
+                )
+        elif (
+            reference_source["kind"] != "ros_message"
+            or reference_source["topic"] != timing_source["topic"]
+            or reference_source["message_type"] != timing_source["message_type"]
+        ):
+            raise ArtifactValidationError(
+                f"ROS protocol reference {logical_name!r} must share the "
+                "protocol_timing topic and message type"
+            )
+        if reference_source["field"] != expected_field:
+            raise ArtifactValidationError(
+                f"protocol reference {logical_name!r} source field must be "
+                f"{expected_field!r}, got {reference_source['field']!r}"
+            )
     for index, signal in enumerate(signals):
         if signal["clock_id"] not in clock_ids:
             raise ArtifactValidationError(
@@ -163,6 +266,25 @@ def validate_acquisition_run(
                     f"quantity/unit {expected_semantics!r}, got "
                     f"{actual_semantics!r}"
                 )
+        source = signal["source"]
+        if source["kind"] == "protocol_player":
+            expected_field = _PROTOCOL_PLAYER_FIELDS.get(signal["semantic_role"])
+            if expected_field is None:
+                raise ArtifactValidationError(
+                    f"signals[{index}] role {signal['semantic_role']!r} cannot "
+                    "originate from the protocol player"
+                )
+            if source["field"] != expected_field:
+                raise ArtifactValidationError(
+                    f"signals[{index}] role {signal['semantic_role']!r} must "
+                    f"use protocol-player field {expected_field!r}, got "
+                    f"{source['field']!r}"
+                )
+            if source["protocol_artifact_id"] != manifest["protocol"]["artifact_id"]:
+                raise ArtifactValidationError(
+                    f"signals[{index}] protocol-player source names a different "
+                    "protocol artifact"
+                )
     for index, topic in enumerate(topics):
         topic_clock = topic.get("clock_id")
         if topic_clock is not None and topic_clock not in clock_ids:
@@ -172,6 +294,37 @@ def validate_acquisition_run(
             )
 
     topics_by_name = {topic["topic"]: topic for topic in topics}
+    if timing_source["kind"] == "ros_message":
+        recorded = topics_by_name.get(timing_source["topic"])
+        if recorded is None:
+            raise ArtifactValidationError(
+                "protocol_timing ROS source topic is not recorded: "
+                f"{timing_source['topic']!r}"
+            )
+        if recorded["message_type"] != timing_source["message_type"]:
+            raise ArtifactValidationError(
+                "protocol_timing ROS source message type "
+                f"{timing_source['message_type']!r} disagrees with recorded "
+                f"topic type {recorded['message_type']!r}"
+            )
+        if recorded.get("clock_id") != protocol_timing["clock_id"]:
+            raise ArtifactValidationError(
+                f"protocol_timing clock {protocol_timing['clock_id']!r} "
+                "disagrees with recorded topic clock "
+                f"{recorded.get('clock_id')!r}"
+            )
+        if not recorded["required_for_conversion"]:
+            raise ArtifactValidationError(
+                "protocol_timing ROS source topic must be required for conversion"
+            )
+        if (
+            manifest["outcome"]["status"] == "completed"
+            and recorded["message_count"] == 0
+        ):
+            raise ArtifactValidationError(
+                "completed acquisition has no recorded protocol_timing source"
+            )
+
     for index, signal in enumerate(signals):
         source = signal["source"]
         if source["kind"] != "ros_message":

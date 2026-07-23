@@ -281,7 +281,21 @@ def _joint_state_descriptor(
     unit: str,
     sample_count: int,
     field: str,
+    protocol_artifact_id: str | None = None,
 ) -> dict[str, Any]:
+    source = (
+        {
+            "kind": "protocol_player",
+            "protocol_artifact_id": protocol_artifact_id,
+            "field": field,
+        }
+        if protocol_artifact_id is not None
+        else {
+            "kind": "mujoco",
+            "object_type": "state",
+            "field": field,
+        }
+    )
     return {
         "name": name,
         "quantity": quantity,
@@ -290,11 +304,7 @@ def _joint_state_descriptor(
         "joint_order": list(FER_ARM_JOINT_ORDER),
         "positive_direction": "same_as_joint_coordinate",
         "clock_id": "canonical",
-        "source": {
-            "kind": "mujoco",
-            "object_type": "state",
-            "field": field,
-        },
+        "source": source,
         "sample_count": sample_count,
     }
 
@@ -359,12 +369,18 @@ def _normalized_bundle(
         np.arange((transitions + 1) * 7, dtype="<f8").reshape(transitions + 1, 7) * 1e-3
     )
     dq_rad_s = np.zeros((transitions + 1, 7), dtype="<f8")
+    desired_q_rad = q_rad.copy()
+    desired_dq_rad_s = dq_rad_s.copy()
+    desired_ddq_rad_s2 = np.zeros((transitions + 1, 7), dtype="<f8")
     tau_controller_request_nm = np.full((transitions, 7), 0.05, dtype="<f8")
     arrays = {
         "state_time_s": state_time_s,
         "control_time_s": control_time_s,
         "q_rad": q_rad,
         "dq_rad_s": dq_rad_s,
+        "desired_q_rad": desired_q_rad,
+        "desired_dq_rad_s": desired_dq_rad_s,
+        "desired_ddq_rad_s2": desired_ddq_rad_s2,
         "tau_controller_request_Nm": tau_controller_request_nm,
     }
 
@@ -401,6 +417,24 @@ def _normalized_bundle(
         array=tau_controller_request_nm,
         unit="N*m",
     )
+    desired_q_reference = _array_reference(
+        placeholder_file,
+        key="desired_q_rad",
+        array=desired_q_rad,
+        unit="rad",
+    )
+    desired_dq_reference = _array_reference(
+        placeholder_file,
+        key="desired_dq_rad_s",
+        array=desired_dq_rad_s,
+        unit="rad/s",
+    )
+    desired_ddq_reference = _array_reference(
+        placeholder_file,
+        key="desired_ddq_rad_s2",
+        array=desired_ddq_rad_s2,
+        unit="rad/s^2",
+    )
     manifest: dict[str, Any] = {
         "schema": "fer-mujoco-sysid/normalized-trajectory@1",
         "artifact_id": "normalized-fixture",
@@ -417,6 +451,15 @@ def _normalized_bundle(
             path="protocols/motion-fixture/protocol.json",
         ),
         "protocol_segment_id": "excitation",
+        "protocol_sample_interval": {
+            "start_index": 0,
+            "end_index_exclusive": transitions + 1,
+        },
+        "protocol_reference_signals": {
+            "desired_position": "desired_position_reference",
+            "desired_velocity": "desired_velocity_reference",
+            "desired_acceleration": "desired_acceleration_reference",
+        },
         "lineage_group_id": "fixture-lineage",
         "converter": {
             "software": {
@@ -487,6 +530,51 @@ def _normalized_bundle(
                 time_base="control",
                 sample_count=transitions,
                 end_timestamp_ns=(transitions - 1) * _PERIOD_NS,
+            ),
+            _normalized_signal(
+                descriptor=_joint_state_descriptor(
+                    name="desired_position_reference",
+                    quantity="joint_position",
+                    semantic_role="desired_joint_position",
+                    unit="rad",
+                    sample_count=transitions + 1,
+                    field="q_rad",
+                    protocol_artifact_id="motion-fixture",
+                ),
+                reference=desired_q_reference,
+                time_base="state",
+                sample_count=transitions + 1,
+                end_timestamp_ns=transitions * _PERIOD_NS,
+            ),
+            _normalized_signal(
+                descriptor=_joint_state_descriptor(
+                    name="desired_velocity_reference",
+                    quantity="joint_velocity",
+                    semantic_role="desired_joint_velocity",
+                    unit="rad/s",
+                    sample_count=transitions + 1,
+                    field="dq_rad_s",
+                    protocol_artifact_id="motion-fixture",
+                ),
+                reference=desired_dq_reference,
+                time_base="state",
+                sample_count=transitions + 1,
+                end_timestamp_ns=transitions * _PERIOD_NS,
+            ),
+            _normalized_signal(
+                descriptor=_joint_state_descriptor(
+                    name="desired_acceleration_reference",
+                    quantity="joint_acceleration",
+                    semantic_role="desired_joint_acceleration",
+                    unit="rad/s^2",
+                    sample_count=transitions + 1,
+                    field="ddq_rad_s2",
+                    protocol_artifact_id="motion-fixture",
+                ),
+                reference=desired_ddq_reference,
+                time_base="state",
+                sample_count=transitions + 1,
+                end_timestamp_ns=transitions * _PERIOD_NS,
             ),
         ],
         "quality": {"status": "pass", "report": quality_report},
@@ -869,6 +957,43 @@ def test_normalized_rejects_signal_on_wrong_time_base(tmp_path: Path) -> None:
     with pytest.raises(
         ArtifactValidationError,
         match=r"q_rad.*control time base|signal array 'q_rad'.*control time base",
+    ):
+        validate_normalized_trajectory(manifest, arrays, root=root)
+
+
+def test_normalized_protocol_reference_must_name_desired_position(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "normalized"
+    manifest, arrays = _normalized_bundle(root)
+    manifest["protocol_reference_signals"]["desired_position"] = (
+        "measured_joint_position"
+    )
+    manifest["content_sha256"] = content_sha256(manifest, arrays)
+
+    with pytest.raises(
+        ArtifactValidationError,
+        match="protocol reference 'desired_position' requires",
+    ):
+        validate_normalized_trajectory(manifest, arrays, root=root)
+
+
+def test_normalized_protocol_reference_must_be_native_and_identity_scaled(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "normalized"
+    manifest, arrays = _normalized_bundle(root)
+    reference_signal = next(
+        signal
+        for signal in manifest["signals"]
+        if signal["descriptor"]["name"] == "desired_position_reference"
+    )
+    reference_signal["numeric_transform"]["scale"] = 2.0
+    manifest["content_sha256"] = content_sha256(manifest, arrays)
+
+    with pytest.raises(
+        ArtifactValidationError,
+        match="protocol reference 'desired_position'.*identity numeric transform",
     ):
         validate_normalized_trajectory(manifest, arrays, root=root)
 
