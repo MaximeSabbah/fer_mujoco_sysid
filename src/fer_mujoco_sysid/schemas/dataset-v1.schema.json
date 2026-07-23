@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fer-mujoco-sysid:schema:dataset:1",
+  "title": "Versioned FER system-identification dataset",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "artifact_id",
+    "content_sha256",
+    "dataset_id",
+    "version",
+    "title",
+    "description",
+    "created_at",
+    "source_kind",
+    "joint_order",
+    "authors",
+    "license",
+    "citation",
+    "protocols",
+    "runs",
+    "trajectories",
+    "splits",
+    "assets"
+  ],
+  "properties": {
+    "schema": {
+      "const": "fer-mujoco-sysid/dataset@1"
+    },
+    "artifact_id": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+    },
+    "content_sha256": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/sha256"
+    },
+    "dataset_id": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+    },
+    "version": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/semanticVersion"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_kind": {
+      "type": "string",
+      "enum": [
+        "simulation",
+        "real_robot",
+        "mixed"
+      ]
+    },
+    "joint_order": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/ferArmJointOrder"
+    },
+    "authors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/author"
+      }
+    },
+    "license": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/license"
+    },
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preferred_text"
+      ],
+      "properties": {
+        "preferred_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "citation_file": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "doi": {
+          "type": "string",
+          "pattern": "^10\\.[0-9]{4,9}/\\S+$"
+        },
+        "landing_page": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/httpsUri"
+        }
+      }
+    },
+    "protocols": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+        "properties": {
+          "schema": {
+            "const": "fer-mujoco-sysid/motion-protocol@1"
+          }
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+        "properties": {
+          "schema": {
+            "const": "fer-mujoco-sysid/acquisition-run@1"
+          }
+        }
+      }
+    },
+    "trajectories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+        "properties": {
+          "schema": {
+            "const": "fer-mujoco-sysid/normalized-trajectory@1"
+          }
+        }
+      }
+    },
+    "splits": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+      "properties": {
+        "schema": {
+          "const": "fer-mujoco-sysid/splits@1"
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/datasetAsset"
+      }
+    },
+    "supersedes": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+      "properties": {
+        "schema": {
+          "const": "fer-mujoco-sysid/dataset@1"
+        }
+      }
+    },
+    "release_notes": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+    }
+  },
+  "$defs": {
+    "datasetAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "storage",
+        "file"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "raw_recording",
+            "normalized_data",
+            "protocol",
+            "report",
+            "documentation",
+            "other"
+          ]
+        },
+        "storage": {
+          "type": "string",
+          "enum": [
+            "git",
+            "git_lfs",
+            "versioned_release",
+            "object_store"
+          ]
+        },
+        "file": {
+          "oneOf": [
+            {
+              "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+            },
+            {
+              "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/externalFileReference"
+            }
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fer-mujoco-sysid:schema:common:1",
+  "title": "FER MuJoCo system-identification common schema definitions",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifactId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+    },
+    "schemaDiscriminator": {
+      "type": "string",
+      "pattern": "^fer-mujoco-sysid/[a-z0-9-]+@1$"
+    },
+    "semanticVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!\\./)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)(?!.*//)(?!.*\\/$).+$"
+    },
+    "httpsUri": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "unit": {
+      "type": "string",
+      "enum": [
+        "1",
+        "s",
+        "ns",
+        "rad",
+        "rad/s",
+        "rad/s^2",
+        "rad/s^3",
+        "m",
+        "m/s",
+        "N",
+        "N*m",
+        "N*m*s/rad",
+        "kg",
+        "kg*m^2",
+        "K",
+        "A"
+      ]
+    },
+    "jointName": {
+      "type": "string",
+      "enum": [
+        "fer_joint1",
+        "fer_joint2",
+        "fer_joint3",
+        "fer_joint4",
+        "fer_joint5",
+        "fer_joint6",
+        "fer_joint7"
+      ]
+    },
+    "ferArmJointOrder": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "const": "fer_joint1"
+        },
+        {
+          "const": "fer_joint2"
+        },
+        {
+          "const": "fer_joint3"
+        },
+        {
+          "const": "fer_joint4"
+        },
+        {
+          "const": "fer_joint5"
+        },
+        {
+          "const": "fer_joint6"
+        },
+        {
+          "const": "fer_joint7"
+        }
+      ],
+      "items": false,
+      "minItems": 7,
+      "maxItems": 7
+    },
+    "vector3": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "vector7": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 7,
+      "maxItems": 7
+    },
+    "fileReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "externalFileReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "uri": {
+          "$ref": "#/$defs/httpsUri"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "artifactReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "schema",
+        "manifest_sha256",
+        "locator"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "#/$defs/artifactId"
+        },
+        "schema": {
+          "$ref": "#/$defs/schemaDiscriminator"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bundle_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "locator": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "path"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "relative"
+                },
+                "path": {
+                  "$ref": "#/$defs/relativePath"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "uri"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "external"
+                },
+                "uri": {
+                  "$ref": "#/$defs/httpsUri"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "numericArrayReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "key",
+        "dtype",
+        "shape",
+        "unit"
+      ],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/fileReference"
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_./-]*$"
+        },
+        "dtype": {
+          "type": "string",
+          "enum": [
+            "<f8",
+            "<i8",
+            "<i4",
+            "<u8",
+            "<u4",
+            "|b1"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        }
+      }
+    },
+    "sourceDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "revision",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/$defs/httpsUri"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "softwareComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "$ref": "#/$defs/httpsUri"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "patch": {
+          "$ref": "#/$defs/fileReference"
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload_id",
+        "mass_kg",
+        "center_of_mass_m"
+      ],
+      "properties": {
+        "payload_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "mass_kg": {
+          "type": "number",
+          "minimum": 0
+        },
+        "center_of_mass_m": {
+          "$ref": "#/$defs/vector3"
+        },
+        "inertia_kg_m2": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 6,
+          "maxItems": 6
+        },
+        "configuration": {
+          "$ref": "#/$defs/fileReference"
+        }
+      }
+    },
+    "clockDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clock_id",
+        "domain",
+        "epoch",
+        "tick_unit",
+        "resolution_ns",
+        "timestamp_source"
+      ],
+      "properties": {
+        "clock_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "robot_monotonic",
+            "ros_time",
+            "steady_receive",
+            "mcap_log_time",
+            "mcap_publish_time",
+            "simulation_clock",
+            "unix_utc"
+          ]
+        },
+        "epoch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tick_unit": {
+          "const": "ns"
+        },
+        "resolution_ns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timestamp_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "absolute_start_utc": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "clockAlignment": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_clock_id",
+            "target_clock_id",
+            "method",
+            "valid_source_start_ns",
+            "valid_source_end_ns",
+            "extrapolation_allowed",
+            "rms_residual_s",
+            "max_residual_s",
+            "evidence"
+          ],
+          "properties": {
+            "source_clock_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_clock_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "method": {
+              "const": "identity"
+            },
+            "valid_source_start_ns": {
+              "type": "string",
+              "pattern": "^-?[0-9]+$"
+            },
+            "valid_source_end_ns": {
+              "type": "string",
+              "pattern": "^-?[0-9]+$"
+            },
+            "extrapolation_allowed": {
+              "const": false
+            },
+            "rms_residual_s": {
+              "const": 0
+            },
+            "max_residual_s": {
+              "const": 0
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_clock_id",
+            "target_clock_id",
+            "method",
+            "scale",
+            "offset_s",
+            "rms_residual_s",
+            "max_residual_s",
+            "valid_source_start_ns",
+            "valid_source_end_ns",
+            "extrapolation_allowed",
+            "evidence"
+          ],
+          "properties": {
+            "source_clock_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_clock_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "method": {
+              "const": "affine"
+            },
+            "scale": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "offset_s": {
+              "type": "number"
+            },
+            "rms_residual_s": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max_residual_s": {
+              "type": "number",
+              "minimum": 0
+            },
+            "valid_source_start_ns": {
+              "type": "string",
+              "pattern": "^-?[0-9]+$"
+            },
+            "valid_source_end_ns": {
+              "type": "string",
+              "pattern": "^-?[0-9]+$"
+            },
+            "extrapolation_allowed": {
+              "const": false
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_clock_id",
+            "target_clock_id",
+            "method",
+            "mapping",
+            "rms_residual_s",
+            "max_residual_s",
+            "valid_source_start_ns",
+            "valid_source_end_ns",
+            "extrapolation_allowed",
+            "evidence"
+          ],
+          "properties": {
+            "source_clock_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "target_clock_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "method": {
+              "const": "piecewise_affine"
+            },
+            "mapping": {
+              "$ref": "#/$defs/fileReference"
+            },
+            "rms_residual_s": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max_residual_s": {
+              "type": "number",
+              "minimum": 0
+            },
+            "valid_source_start_ns": {
+              "type": "string",
+              "pattern": "^-?[0-9]+$"
+            },
+            "valid_source_end_ns": {
+              "type": "string",
+              "pattern": "^-?[0-9]+$"
+            },
+            "extrapolation_allowed": {
+              "const": false
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "signalSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topic",
+            "message_type",
+            "field"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ros_message"
+            },
+            "topic": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "message_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "object_type",
+            "field"
+          ],
+          "properties": {
+            "kind": {
+              "const": "mujoco"
+            },
+            "object_type": {
+              "type": "string",
+              "enum": [
+                "state",
+                "sensor",
+                "actuator",
+                "data"
+              ]
+            },
+            "object_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "file",
+            "field"
+          ],
+          "properties": {
+            "kind": {
+              "const": "file"
+            },
+            "file": {
+              "$ref": "#/$defs/fileReference"
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "effortSemantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "location",
+        "gravity",
+        "coriolis",
+        "friction_compensation",
+        "rate_limit_position",
+        "definition",
+        "authority"
+      ],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": [
+            "controller",
+            "hardware",
+            "sensor",
+            "simulator",
+            "estimator"
+          ]
+        },
+        "location": {
+          "type": "string",
+          "enum": [
+            "generalized_coordinate",
+            "link_side",
+            "motor_side",
+            "simulator_actuator",
+            "estimated_external"
+          ]
+        },
+        "gravity": {
+          "$ref": "#/$defs/compositionState"
+        },
+        "coriolis": {
+          "$ref": "#/$defs/compositionState"
+        },
+        "friction_compensation": {
+          "$ref": "#/$defs/compositionState"
+        },
+        "rate_limit_position": {
+          "type": "string",
+          "enum": [
+            "before",
+            "after",
+            "not_applicable",
+            "unknown"
+          ]
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority": {
+          "$ref": "#/$defs/sourceDocument"
+        }
+      }
+    },
+    "compositionState": {
+      "type": "string",
+      "enum": [
+        "included",
+        "excluded",
+        "not_applicable",
+        "unknown"
+      ]
+    },
+    "jointEffortSignal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "quantity",
+        "semantic_role",
+        "unit",
+        "joint_order",
+        "positive_direction",
+        "clock_id",
+        "source",
+        "sample_count",
+        "effort_semantics"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "quantity": {
+          "const": "joint_effort"
+        },
+        "semantic_role": {
+          "type": "string",
+          "enum": [
+            "controller_effort_command",
+            "hardware_desired_link_effort",
+            "measured_link_effort",
+            "simulated_actuator_effort",
+            "estimated_external_effort",
+            "model_gravity_effort",
+            "model_coriolis_effort"
+          ]
+        },
+        "unit": {
+          "const": "N*m"
+        },
+        "joint_order": {
+          "$ref": "#/$defs/ferArmJointOrder"
+        },
+        "positive_direction": {
+          "const": "same_as_joint_coordinate"
+        },
+        "clock_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/signalSource"
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_rate_hz": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "effort_semantics": {
+          "$ref": "#/$defs/effortSemantics"
+        }
+      }
+    },
+    "jointStateSignal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "quantity",
+        "semantic_role",
+        "unit",
+        "joint_order",
+        "positive_direction",
+        "clock_id",
+        "source",
+        "sample_count"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+        },
+        "quantity": {
+          "type": "string",
+          "enum": [
+            "joint_position",
+            "joint_velocity",
+            "joint_acceleration",
+            "joint_temperature",
+            "joint_motor_current"
+          ]
+        },
+        "semantic_role": {
+          "type": "string",
+          "enum": [
+            "commanded_joint_position",
+            "desired_joint_position",
+            "measured_joint_position",
+            "commanded_joint_velocity",
+            "desired_joint_velocity",
+            "measured_joint_velocity",
+            "desired_joint_acceleration",
+            "measured_joint_acceleration",
+            "derived_joint_velocity",
+            "derived_joint_acceleration",
+            "measured_joint_temperature",
+            "measured_joint_motor_current"
+          ]
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "rad",
+            "rad/s",
+            "rad/s^2",
+            "K",
+            "A"
+          ]
+        },
+        "joint_order": {
+          "$ref": "#/$defs/ferArmJointOrder"
+        },
+        "positive_direction": {
+          "const": "same_as_joint_coordinate"
+        },
+        "clock_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/signalSource"
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_rate_hz": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "signalDescriptor": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/jointStateSignal"
+        },
+        {
+          "$ref": "#/$defs/jointEffortSignal"
+        }
+      ]
+    },
+    "parameterTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "joint_name"
+          ],
+          "properties": {
+            "kind": {
+              "const": "joint"
+            },
+            "joint_name": {
+              "$ref": "#/$defs/jointName"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "body_name"
+          ],
+          "properties": {
+            "kind": {
+              "const": "body"
+            },
+            "body_name": {
+              "type": "string",
+              "enum": [
+                "link1",
+                "link2",
+                "link3",
+                "link4",
+                "link5",
+                "link6"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "composite_name"
+          ],
+          "properties": {
+            "kind": {
+              "const": "rigid_composite"
+            },
+            "composite_name": {
+              "const": "link7_hand_fingers_payload"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "signal_name"
+          ],
+          "properties": {
+            "kind": {
+              "const": "signal"
+            },
+            "signal_name": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "const": "global"
+            },
+            "name": {
+              "type": "string",
+              "enum": [
+                "control_delay",
+                "torque_scale"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "parameterComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value",
+        "unit",
+        "nominal_value",
+        "initial_value",
+        "bounds",
+        "identifiability_status",
+        "export_policy"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "value": {
+          "type": "number"
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "nominal_value": {
+          "type": "number"
+        },
+        "initial_value": {
+          "type": "number"
+        },
+        "bounds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lower",
+            "upper"
+          ],
+          "properties": {
+            "lower": {
+              "type": "number"
+            },
+            "upper": {
+              "type": "number"
+            }
+          }
+        },
+        "identifiability_status": {
+          "type": "string",
+          "enum": [
+            "retained",
+            "weak",
+            "unidentifiable",
+            "fixed"
+          ]
+        },
+        "export_policy": {
+          "type": "string",
+          "enum": [
+            "mjcf",
+            "report_only",
+            "fixed"
+          ]
+        },
+        "uncertainty": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "confidence_level",
+            "lower",
+            "upper"
+          ],
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": [
+                "local_jacobian",
+                "trajectory_bootstrap",
+                "none"
+              ]
+            },
+            "confidence_level": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "lower": {
+              "type": "number"
+            },
+            "upper": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spdx",
+        "text"
+      ],
+      "properties": {
+        "spdx": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9.+-]+$"
+        },
+        "text": {
+          "$ref": "#/$defs/fileReference"
+        }
+      }
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "orcid": {
+          "type": "string",
+          "pattern": "^https://orcid\\.org/[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9X]{4}$"
+        },
+        "affiliation": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

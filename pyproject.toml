@@ -11,6 +11,7 @@ requires-python = ">=3.12,<3.13"
 license = "BSD-2-Clause"
 license-files = ["LICENSE"]
 dependencies = [
+    "jsonschema>=4.23,<5",
     "mujoco[sysid]==3.10.0",
     "numpy>=2.0,<3",
 ]
@@ -23,6 +24,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+fer_mujoco_sysid = ["schemas/*.schema.json"]
 
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-config", "--strict-markers"]

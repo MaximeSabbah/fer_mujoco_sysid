@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fer-mujoco-sysid:schema:acquisition-run:1",
+  "title": "Immutable FER acquisition run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "artifact_id",
+    "started_at_utc",
+    "ended_at_utc",
+    "backend",
+    "protocol",
+    "protocol_validation",
+    "joint_order",
+    "robot",
+    "controller",
+    "source_model",
+    "clock_domains",
+    "signals",
+    "recording_files",
+    "recorded_topics",
+    "software",
+    "outcome"
+  ],
+  "properties": {
+    "schema": {
+      "const": "fer-mujoco-sysid/acquisition-run@1"
+    },
+    "artifact_id": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+    },
+    "started_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "backend": {
+      "type": "string",
+      "enum": [
+        "standalone_mujoco",
+        "ros_mujoco",
+        "agimus_fer"
+      ]
+    },
+    "protocol": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+      "properties": {
+        "schema": {
+          "const": "fer-mujoco-sysid/motion-protocol@1"
+        }
+      }
+    },
+    "protocol_validation": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+      "properties": {
+        "schema": {
+          "const": "fer-mujoco-sysid/protocol-validation@1"
+        }
+      }
+    },
+    "joint_order": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/ferArmJointOrder"
+    },
+    "robot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "robot_id",
+        "end_effector_id",
+        "payload"
+      ],
+      "properties": {
+        "platform": {
+          "const": "FER"
+        },
+        "robot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "firmware_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "end_effector_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "payload": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/payload"
+        },
+        "environment_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "update_rate_hz",
+        "configuration"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "update_rate_hz": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "configuration": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        }
+      }
+    },
+    "source_model": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/sourceDocument"
+    },
+    "clock_domains": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/clockDescriptor"
+      }
+    },
+    "signals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/signalDescriptor"
+      }
+    },
+    "recording_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+      }
+    },
+    "recorded_topics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "message_type",
+          "message_count",
+          "required_for_conversion"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "message_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "required_for_conversion": {
+            "type": "boolean"
+          },
+          "clock_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "software": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/softwareComponent"
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason_code"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "cancelled",
+            "controller_error",
+            "robot_reflex",
+            "recording_error",
+            "simulation_error"
+          ]
+        },
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "details": {
+          "type": "string"
+        }
+      }
+    },
+    "operator_notes": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+    }
+  }
+}

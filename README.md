@@ -31,22 +31,28 @@ The repository currently provides:
 
 - a Python 3.12 environment pinned to `mujoco[sysid]==3.10.0`;
 - a reviewed nominal FER model contract;
-- a seven-axis identification-model projection; and
-- physical-parity, dynamics, provenance, and sysid API tests.
+- a seven-axis identification-model projection;
+- versioned, pickle-free artifact contracts; and
+- physical-parity, dynamics, provenance, artifact, and sysid API tests.
 
 Synthetic parameter recovery, excitation generation, recording adapters, and
 real-data fitting will be added incrementally.
 
-## Datasets
+## Protocols and datasets
 
-Reusable excitation trajectories and curated simulated or real recordings are
-first-class project assets and may be committed under [`datasets/`](datasets/).
-Each dataset should include its motion protocol, signal definitions, model and
-software versions, acquisition metadata, and train/validation role.
+Reusable excitation trajectories are first-class project assets under
+[`protocols/`](protocols/). The compiled motion arrays are stored with their
+generator, model, payload, segment, and validation provenance so another FER
+setup can check and execute the exact same motion.
 
-Small, reusable datasets should live directly in Git. Large binary recordings
-can use Git LFS or a versioned external release, while their metadata, hashes,
-conversion recipe, and derived compact data remain in this repository.
+Robot recordings remain outside the source repository by default. A simulated
+or real recording enters [`datasets/`](datasets/) only when it is deliberately
+curated, licensed, and useful to share. Compact curated data can live directly
+in Git; unusually large public recordings can be referenced by immutable
+release URL and SHA-256.
+
+The [artifact contracts](docs/artifact_contracts.md) define the exact protocol,
+acquisition, normalized-trajectory, fit-result, and dataset formats.
 
 ## Setup
 

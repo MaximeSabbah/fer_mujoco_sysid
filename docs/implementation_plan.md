@@ -116,9 +116,11 @@ from it; they are never fitted independently.
 - Training and held-out validation are separated by complete motion protocols,
   not by neighboring samples from the same trajectory.
 - Commanded, desired, simulated-actuator, and measured torque retain distinct
-  names and semantics throughout the data pipeline. Actual applied or measured
-  torque is used as the forward-model input; a position reference is not
-  silently treated as torque.
+  names and semantics throughout the data pipeline. A fit selects one explicit
+  torque channel plus a documented composition/transformation only after its
+  semantics have been validated. No measured or desired channel is
+  authoritative by name alone, and a position reference is never silently
+  treated as torque.
 - Robot time, ROS header time, bag-receive time, and simulation `/clock` remain
   distinct until an explicit conversion step aligns them.
 - Logged `q` and `dq` drive short forward-rollout residuals. Numerically
@@ -144,7 +146,7 @@ from it; they are never fitted independently.
 | ID | Milestone | Status | Primary evidence |
 | --- | --- | --- | --- |
 | M0 | Reproducible foundation and model contract | Validated | 34 passing tests; pinned environment; reviewed model parity |
-| M1 | Protocol, dataset, and artifact schemas | Planned | Schema fixtures and round-trip tests |
+| M1 | Protocol, dataset, and artifact schemas | In progress | Schema fixtures and round-trip tests |
 | M2 | Parameterization and synthetic unit recovery | Planned | Known-parameter recovery and physical-validity report |
 | M3 | FER excitation design and protocol validation | Planned | Conditioned, constrained train/validation protocols |
 | M4 | Standalone end-to-end simulation pipeline | Planned | Dataset-to-fit-to-report synthetic run |
@@ -196,14 +198,16 @@ Define stable, versioned contracts before producing data:
 - commanded effort, desired effort, simulated actuator effort, total measured
   joint effort, and external effort as separate optional signals;
 - source clock domains and explicit alignment metadata;
-- train, validation, failed, and diagnostic-only roles;
+- fit, development, held-out-test, diagnostic-only, and excluded roles,
+  separate from acquisition outcome;
 - a canonical identified-parameter manifest; and
 - optimizer, uncertainty, and report metadata;
 - source, protocol, dataset, and model hashes; and
 - directory conventions for reusable datasets.
 
-The schema must support both in-repository compact datasets and externally
-stored large recordings.
+Shareable motion protocols live in-repository. Robot recordings are local by
+default; the schema also supports deliberately curated compact datasets and
+externally stored public recordings.
 
 ### Required implementation
 
@@ -230,6 +234,17 @@ stored large recordings.
 ### Review checkpoint
 
 Approve the schemas and storage formats before implementing the fitting core.
+
+### Implementation slices
+
+- **M1a — contract foundation (current review):** packaged schemas, strict
+  JSON/pickle-free NPZ utilities, deterministic content hashes, semantic
+  validation for motion and normalized trajectories, and a MuJoCo 3.10
+  public-API compatibility test.
+- **M1b — complete artifact workflow:** sealed-bundle finalization and
+  verification, semantic validators across acquisition/dataset/splits/results,
+  cross-artifact torque-input eligibility, committed example data, and the
+  standalone dataset-validation command.
 
 ## M2 — Parameterization and synthetic unit recovery
 
@@ -626,22 +641,29 @@ The manifest records at least:
 A reusable published dataset should follow this logical layout:
 
 ```text
-datasets/<dataset_id>/
+protocols/<protocol_id>/<revision>/
+  protocol.json
+  desired.npz
+  checksums.sha256
+
+datasets/<dataset_id>/<version>/
   README.md
   LICENSE
-  dataset.toml
+  CITATION.cff
+  dataset.json
   checksums.sha256
-  splits.toml
-  protocols/
+  splits.json
   runs/<run_id>/
-    run.toml
+    run.json
     raw/
     processed/
   reports/
 ```
 
-Large MCAP files may be referenced through Git LFS or a versioned release, but
-their URL, hash, metadata, and exact conversion command remain tracked.
+Acquisition runs normally live outside the source repository. A large MCAP is
+published only deliberately and may be referenced through a versioned release;
+its immutable URL, size, hash, metadata, and exact conversion command remain
+tracked.
 
 ## Review procedure for each milestone
 
@@ -707,6 +729,9 @@ The following are failures even if an optimizer returns `success`:
 | D009 | 2026-07-23 | Keep kinematics fixed unless an external metrology experiment is added. |
 | D010 | 2026-07-23 | Use controller-managed ROS 2 trajectory playback, not a Python timing loop, on hardware. |
 | D011 | 2026-07-23 | Prioritize friction identification because the real pregrasp experiments exposed low-speed tracking error consistent with missing friction. |
+| D012 | 2026-07-23 | Use strict JSON metadata plus safe numeric NPZ as the portable artifact boundary; adapt these artifacts to public MuJoCo sysid containers in memory. |
+| D013 | 2026-07-23 | Use `fer_joint1` through `fer_joint7` as the canonical portable joint order and map Hydrax names at the adapter boundary. |
+| D014 | 2026-07-23 | Keep reusable compiled motions in `protocols/`; keep per-robot recordings external by default and publish datasets only through deliberate curation. |
 
 ## Open decisions
 
@@ -714,8 +739,6 @@ These decisions are intentionally deferred to the named milestone:
 
 | Decision | Due |
 | --- | --- |
-| Compact normalized array format and schema details | M1 |
-| Git versus Git LFS threshold and public dataset release policy | M1 |
 | Initial parameter bounds and scaling | M2 |
 | Numerical synthetic-recovery tolerances | M2 |
 | Whether native MuJoCo damping plus friction loss is an adequate FER friction model | M2/M3 |

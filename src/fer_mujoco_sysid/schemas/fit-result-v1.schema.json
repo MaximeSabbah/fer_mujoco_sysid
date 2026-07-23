@@ -1,0 +1,401 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fer-mujoco-sysid:schema:fit-result:1",
+  "title": "FER system-identification fit and export result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "artifact_id",
+    "content_sha256",
+    "created_at",
+    "status",
+    "toolchain",
+    "inputs",
+    "forward_model_input",
+    "fit_configuration",
+    "optimizer_stages",
+    "reproduction",
+    "outputs"
+  ],
+  "properties": {
+    "schema": {
+      "const": "fer-mujoco-sysid/fit-result@1"
+    },
+    "artifact_id": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+    },
+    "content_sha256": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/sha256"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "failed"
+      ]
+    },
+    "failure_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "python_version",
+        "mujoco_version",
+        "dependency_lock",
+        "platform"
+      ],
+      "properties": {
+        "project": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/softwareComponent"
+        },
+        "python_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mujoco_version": {
+          "const": "3.10.0"
+        },
+        "dependency_lock": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "platform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operating_system",
+            "architecture",
+            "cpu",
+            "thread_count"
+          ],
+          "properties": {
+            "operating_system": {
+              "type": "string",
+              "minLength": 1
+            },
+            "architecture": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cpu": {
+              "type": "string",
+              "minLength": 1
+            },
+            "thread_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "blas": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_model",
+        "dataset",
+        "splits",
+        "trajectories"
+      ],
+      "properties": {
+        "source_model": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/sourceDocument"
+        },
+        "dataset": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+          "properties": {
+            "schema": {
+              "const": "fer-mujoco-sysid/dataset@1"
+            }
+          }
+        },
+        "splits": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+          "properties": {
+            "schema": {
+              "const": "fer-mujoco-sysid/splits@1"
+            }
+          }
+        },
+        "trajectories": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+            "properties": {
+              "schema": {
+                "const": "fer-mujoco-sysid/normalized-trajectory@1"
+              }
+            }
+          }
+        }
+      }
+    },
+    "forward_model_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "signal_name",
+        "semantic_role",
+        "selection_rationale",
+        "transformation"
+      ],
+      "properties": {
+        "signal_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "semantic_role": {
+          "type": "string",
+          "enum": [
+            "controller_effort_command",
+            "hardware_desired_link_effort",
+            "measured_link_effort",
+            "simulated_actuator_effort"
+          ]
+        },
+        "selection_rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transformation": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        }
+      }
+    },
+    "fit_configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parameters",
+        "windowing",
+        "residual",
+        "pre_registered_metrics"
+      ],
+      "properties": {
+        "parameters": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "windowing": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "residual": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "pre_registered_metrics": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        }
+      }
+    },
+    "optimizer_stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage_id",
+          "backend",
+          "parameter_families",
+          "seed",
+          "max_iterations",
+          "configuration",
+          "status",
+          "termination_reason"
+        ],
+        "properties": {
+          "stage_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+          },
+          "backend": {
+            "type": "string",
+            "enum": [
+              "mujoco",
+              "scipy",
+              "scipy_parallel_fd"
+            ]
+          },
+          "parameter_families": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "control_delay",
+                "torque_scale",
+                "sensor_bias",
+                "joint_frictionloss",
+                "joint_damping",
+                "joint_armature",
+                "body_mass_com",
+                "body_inertia",
+                "terminal_composite_inertia"
+              ]
+            }
+          },
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "max_iterations": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "configuration": {
+            "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "skipped"
+            ]
+          },
+          "termination_reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "initial_objective": {
+            "type": "number",
+            "minimum": 0
+          },
+          "final_objective": {
+            "type": "number",
+            "minimum": 0
+          },
+          "numerical_result": {
+            "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+          }
+        }
+      }
+    },
+    "reproduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "argv",
+        "working_directory"
+      ],
+      "properties": {
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "working_directory": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/relativePath"
+        },
+        "environment": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identified_parameters": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+          "properties": {
+            "schema": {
+              "const": "fer-mujoco-sysid/identified-parameters@1"
+            }
+          }
+        },
+        "metrics": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "numerical_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+          }
+        },
+        "models": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hydrax": {
+              "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+            },
+            "sbmpc_ros": {
+              "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+            }
+          }
+        },
+        "compatibility_report": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "report": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "plots": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "completed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "outputs": {
+            "required": [
+              "identified_parameters",
+              "metrics"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "failure_reason"
+        ]
+      }
+    }
+  ]
+}

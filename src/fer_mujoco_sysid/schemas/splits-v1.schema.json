@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fer-mujoco-sysid:schema:splits:1",
+  "title": "Locked FER dataset split assignment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "artifact_id",
+    "content_sha256",
+    "dataset_id",
+    "dataset_version",
+    "created_at",
+    "locked_at",
+    "grouping_policy",
+    "held_out_policy",
+    "partitions"
+  ],
+  "properties": {
+    "schema": {
+      "const": "fer-mujoco-sysid/splits@1"
+    },
+    "artifact_id": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+    },
+    "content_sha256": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/sha256"
+    },
+    "dataset_id": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+    },
+    "dataset_version": {
+      "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/semanticVersion"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "locked_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "grouping_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group_key",
+        "description"
+      ],
+      "properties": {
+        "group_key": {
+          "const": "lineage_group_id"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configuration": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        }
+      }
+    },
+    "held_out_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pre_registered_metrics",
+        "unseal_condition"
+      ],
+      "properties": {
+        "pre_registered_metrics": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/fileReference"
+        },
+        "unseal_condition": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "partitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fit",
+        "development",
+        "held_out_test",
+        "diagnostic_only",
+        "excluded"
+      ],
+      "properties": {
+        "fit": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/splitMember"
+          }
+        },
+        "development": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/splitMember"
+          }
+        },
+        "held_out_test": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/splitMember"
+          }
+        },
+        "diagnostic_only": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/splitMember"
+          }
+        },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/excludedMember"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "splitMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trajectory",
+        "lineage_group_id",
+        "protocol_artifact_id",
+        "source_run_artifact_id"
+      ],
+      "properties": {
+        "trajectory": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactReference",
+          "properties": {
+            "schema": {
+              "const": "fer-mujoco-sysid/normalized-trajectory@1"
+            }
+          }
+        },
+        "lineage_group_id": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+        },
+        "protocol_artifact_id": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+        },
+        "source_run_artifact_id": {
+          "$ref": "urn:fer-mujoco-sysid:schema:common:1#/$defs/artifactId"
+        }
+      }
+    },
+    "excludedMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "member",
+        "reason_code"
+      ],
+      "properties": {
+        "member": {
+          "$ref": "#/$defs/splitMember"
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "acquisition_failed",
+            "quality_failed",
+            "ambiguous_clock",
+            "ambiguous_effort_semantics",
+            "saturation",
+            "contact_or_reflex",
+            "duplicate",
+            "not_pre_registered",
+            "other"
+          ]
+        },
+        "details": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
