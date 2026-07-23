@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=80,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fer-mujoco-sysid"
+version = "0.1.0"
+description = "MuJoCo system identification for the FER robot"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "BSD-2-Clause"
+license-files = ["LICENSE"]
+dependencies = [
+    "mujoco[sysid]==3.10.0",
+    "numpy>=2.0,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.4.2",
+    "ruff==0.15.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

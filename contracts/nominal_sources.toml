@@ -1,0 +1,15 @@
+contract_version = 1
+
+[models.hydrax]
+role = "identification_baseline"
+repository = "https://github.com/MaximeSabbah/hydrax.git"
+revision = "bdc4db9c249733c145f18eb5517b18e8c0e0c8b3"
+path = "hydrax/models/panda/panda.xml"
+sha256 = "7e8dfc2155ff5b87a10599b4b27b4aa000058e88fb9585aa803e6cb797f902d9"
+
+[models.sbmpc_ros]
+role = "deployment_target"
+repository = "https://github.com/MaximeSabbah/sbmpc_ros.git"
+revision = "fe7dee2c6e669841e5e498f67af1419ebf7fc9b3"
+path = "sbmpc_bringup/mujoco/fer_ros2_control.xml"
+sha256 = "2f0376bbfad737728dfcf150dee1edfad5d0b7b016c766fbd14c067f19be6fce"
