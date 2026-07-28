@@ -4,7 +4,7 @@ import hashlib
 import tomllib
 from pathlib import Path
 
-from fer_mujoco_sysid.model_contract import ModelPaths
+from fer_mujoco_sysid.model import ModelPaths
 
 CONTRACT_PATH = (
     Path(__file__).resolve().parents[1] / "contracts" / "nominal_sources.toml"

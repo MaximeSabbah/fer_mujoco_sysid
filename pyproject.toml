@@ -12,12 +12,16 @@ license = "BSD-2-Clause"
 license-files = ["LICENSE"]
 dependencies = [
     "jsonschema>=4.23,<5",
+    # Protocol/report plots and the MuJoCo review videos are produced by the
+    # project itself, so these are declared rather than relied on
+    # transitively through mujoco[sysid].
+    "imageio>=2.37,<3",
+    "imageio-ffmpeg>=0.6,<1",
+    "matplotlib>=3.10,<4",
     "mujoco[sysid]==3.10.0",
     "numpy>=2.0,<3",
+    "scipy>=1.15,<2",
 ]
-
-[project.scripts]
-fer-mujoco-sysid = "fer_mujoco_sysid.cli:main"
 
 [dependency-groups]
 dev = [
@@ -28,12 +32,12 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.package-data]
-fer_mujoco_sysid = ["schemas/*.schema.json"]
-
 [tool.pytest.ini_options]
 addopts = ["-ra", "--strict-config", "--strict-markers"]
 testpaths = ["tests"]
+markers = [
+    "slow: multi-minute optimizer-driven fits (run with ./scripts/test-all)",
+]
 
 [tool.ruff]
 line-length = 88

@@ -1,6 +1,6 @@
 """FER MuJoCo system-identification tools."""
 
-from fer_mujoco_sysid.model_contract import (
+from fer_mujoco_sysid.model import (
     ARM_JOINT_PAIRS,
     PHYSICAL_BODY_NAMES,
     ModelPaths,

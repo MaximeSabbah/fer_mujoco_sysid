@@ -7,4 +7,6 @@ export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 export MPLCONFIGDIR="${FER_SYSID_MPLCONFIGDIR:-/tmp/fer_mujoco_sysid_mpl}"
 export UV_CACHE_DIR="${FER_SYSID_UV_CACHE_DIR:-/tmp/fer_mujoco_sysid_uv_cache}"
 
-exec uv run --locked pytest "$@"
+# Fast development loop: the multi-minute optimizer-driven recovery gates are
+# excluded here. Run ./scripts/test-all (everything) before review handoff.
+exec uv run --locked pytest -m "not slow" "$@"

@@ -1,80 +1,90 @@
 # FER MuJoCo system identification
 
-Tools and datasets for identifying a Franka Research 3 (FER) robot directly in
-MuJoCo.
+Identify the dynamics of a Franka Research 3 (FER) — joint friction,
+damping, armature and link inertias — directly as MuJoCo model parameters,
+and hand the result to the controllers that consume the model.
 
-The objective is to turn simulated or recorded robot motion into a physically
-consistent MuJoCo model that predicts the FER dynamics more accurately.
 
-## Intended workflow
+## How it works
 
-1. Generate persistently exciting, limit- and collision-checked motions.
-2. Execute the same motion protocol in simulation or on the robot.
-3. Record joint states, applied torques, timing, and relevant robot state.
-4. Convert recordings into MuJoCo system-identification sequences.
-5. Estimate friction and damping first, then physically valid armature and
-   inertial parameters.
-6. Validate the identified model on motions that were not used for fitting.
-7. Export a reproducible MJCF model, parameter manifest, uncertainty report,
-   and diagnostic plots.
+The fitting backend is MuJoCo's own `mujoco.sysid` toolbox, which does **not**
+use the classical regressor least-squares formulation. It simulates short
+windows with candidate parameters and minimizes the difference between
+simulated and measured joint trajectories. That avoids differentiating
+measured positions twice, but it also means the classical diagnostics do not
+come for free — so this project builds them explicitly
+(`diagnostics.py`): regressor condition numbers, relative standard
+deviations, and torque reconstruction.
 
-The fitting backend is MuJoCo's native `mujoco.sysid` toolbox. The project pins
-the exact MuJoCo version so that datasets and results remain reproducible.
+```
+excitation.py   generate exciting motions (friction + inertial families)
+     |          validated against FER limits before anything is written
+     v
+protocols/      committed, immutable, content-hashed motion bundles
+     |
+     v          play in MuJoCo, ROS simulation, or on the robot
+preprocessing.py  zero-phase Butterworth filtering of the recordings
+     |
+     v
+fitting.py      staged parameter fit through mujoco.sysid
+     |
+     v
+diagnostics.py  cond(Y), sigma%, torque residuals
+     |
+     v
+report.py       plots, videos, and the written result
+```
 
-This repository is intended to own the complete workflow, including standalone
-MuJoCo execution, ROS 2 MuJoCo playback and recording, and Agimus FER playback
-and recording. Hydrax and `sbmpc_ros` are downstream model consumers; they are
-not runtime dependencies of the finished identification tool.
+## Layout
 
-The versioned [implementation plan](docs/implementation_plan.md) defines the
-milestones, validation gates, and review checkpoints used to develop the
-project.
+| Path | What it holds |
+| --- | --- |
+| `src/fer_mujoco_sysid/model.py` | builds the 7-axis identification model from the hydrax MJCF and verifies its hash |
+| `src/fer_mujoco_sysid/excitation.py` | motion generation and limit validation for both families |
+| `src/fer_mujoco_sysid/campaign.py` | the committed campaign: which protocols exist, and their seeds |
+| `src/fer_mujoco_sysid/preprocessing.py` | filtering and differentiation of measured signals |
+| `src/fer_mujoco_sysid/fitting.py` | the `mujoco.sysid` adapter: parameter groups, staged fits, conditioning |
+| `src/fer_mujoco_sysid/diagnostics.py` | classical identification metrics |
+| `src/fer_mujoco_sysid/report.py` | the end-to-end simulated run, its plots and videos |
+| `src/fer_mujoco_sysid/io.py` | JSON/NPZ artifacts, content hashes, checksums |
+| `protocols/` | committed motion bundles (manifest + arrays + checksums) |
+| `contracts/nominal_sources.toml` | pins which hydrax/`sbmpc_ros` MJCF is the baseline, by commit and SHA-256 |
+| `docs/` | the implementation plan and the generated review material |
 
-## Project status
+## Excitation families
 
-The repository currently provides:
+Different parameters need different motion, and one family cannot serve both:
 
-- a Python 3.12 environment pinned to `mujoco[sysid]==3.10.0`;
-- a reviewed nominal FER model contract;
-- a seven-axis identification-model projection;
-- versioned, pickle-free and sealed artifact contracts;
-- fail-closed sealed dataset, protocol-interval, lineage, split, source-model,
-  and torque-semantics validation;
-- a `validate-dataset` command; and
-- a deterministic open-loop MuJoCo effort-plant primitive.
+| Family | Motion | Identifies |
+| --- | --- | --- |
+| **friction** | jerk-limited trapezoids: constant-velocity cruises at several low speeds, both directions, holds at the stops, all joints on one shared schedule | `frictionloss`, `damping` — friction is read directly off the cruise plateaus, where inertia contributes nothing |
+| **inertial** | per-joint Fourier series at *different* base frequencies, scaled to the kinematic limits, selected for regressor conditioning | `armature`, link inertias — these need joints moving **independently** and accelerating hard, which the friction family deliberately does not do |
 
-The current plant primitive deliberately does not claim ROS controller parity:
-the ROS effort trajectory controller adds feedback to effort feedforward.
-The shared controller/interpolation contract, repository-owned FER model
-snapshot, synthetic parameter recovery, excitation generation, recording
-adapters, and real-data fitting will be added incrementally.
+## Usage
 
-## Protocols and datasets
-
-Reusable excitation trajectories are first-class project assets under
-[`protocols/`](protocols/). The compiled motion arrays are stored with their
-generator, model, payload, segment, and validation provenance so another FER
-setup can check and execute the exact same motion.
-
-Robot recordings remain outside the source repository by default. A simulated
-or real recording enters [`datasets/`](datasets/) only when it is deliberately
-curated, licensed, and useful to share. Compact curated data can live directly
-in Git; unusually large public recordings can be referenced by immutable
-release URL and SHA-256.
-
-The [artifact contracts](docs/artifact_contracts.md) define the exact protocol,
-acquisition, normalized-trajectory, fit-result, and dataset formats.
-
-## Setup
-
-Python 3.12 and [`uv`](https://docs.astral.sh/uv/) are required.
+Python 3.12 and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync --locked --all-groups
-./scripts/test
-fer-mujoco-sysid validate-dataset DATASET_ROOT --catalog-root CATALOG_ROOT
+./scripts/test                # fast suite (~20 s)
+./scripts/test-all            # every gate, including multi-minute fits
+./scripts/generate-protocols  # rebuild protocols/ and the review plots
+./scripts/generate-protocols --check   # verify committed bundles still regenerate
+./scripts/identification-demo # videos + the full simulated identification
 ```
 
-The nominal model provenance and compatibility guarantees are documented in
-[`contracts/nominal_sources.toml`](contracts/nominal_sources.toml) and the
-[model contract](docs/model_contract.md).
+## Status
+
+Everything runs in simulation. The robot has not moved yet.
+
+| Stage | State |
+| --- | --- |
+| Fitting engine, proven on synthetic data with known hidden values | done |
+| Excitation protocols for both families | done |
+| End-to-end simulated identification with full diagnostics | done — see `docs/identification_demo/result.md` |
+| Playback in ROS simulation | not started |
+| Playback on the real robot | not started |
+| Identified model delivered to hydrax / `sbmpc_ros` | not started |
+
+The [implementation plan](docs/implementation_plan.md) holds the roadmap,
+the gates, and the decision log.

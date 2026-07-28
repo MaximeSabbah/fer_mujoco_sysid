@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Render protocol videos and run the simulated identification round.
+# The fit takes several minutes. --skip-videos / --skip-fit to run parts.
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+export MPLCONFIGDIR="${FER_SYSID_MPLCONFIGDIR:-/tmp/fer_mujoco_sysid_mpl}"
+export UV_CACHE_DIR="${FER_SYSID_UV_CACHE_DIR:-/tmp/fer_mujoco_sysid_uv_cache}"
+export MUJOCO_GL="${MUJOCO_GL:-egl}"
+
+exec uv run --locked python -m fer_mujoco_sysid.report "$@"

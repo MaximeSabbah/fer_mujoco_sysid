@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Review videos are regenerable with ./scripts/identification-demo
+docs/protocol_review/*.mp4

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Generate (default) or --check the committed friction protocol campaign.
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+export MPLCONFIGDIR="${FER_SYSID_MPLCONFIGDIR:-/tmp/fer_mujoco_sysid_mpl}"
+export UV_CACHE_DIR="${FER_SYSID_UV_CACHE_DIR:-/tmp/fer_mujoco_sysid_uv_cache}"
+
+exec uv run --locked python -m fer_mujoco_sysid.campaign "$@"

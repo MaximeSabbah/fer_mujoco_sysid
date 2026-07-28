@@ -3,7 +3,7 @@ from __future__ import annotations
 import mujoco
 import pytest
 
-from fer_mujoco_sysid.model_contract import (
+from fer_mujoco_sysid.model import (
     ModelPaths,
     load_ros_overlay_model,
     resolve_model_paths,

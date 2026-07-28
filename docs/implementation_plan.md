@@ -1,6 +1,6 @@
 # FER MuJoCo system-identification implementation plan (v2)
 
-Last updated: 2026-07-23. Supersedes
+Last updated: 2026-07-28. Supersedes
 [`archive/implementation_plan_v1.md`](archive/implementation_plan_v1.md);
 the v1 decision log D001–D020 remains valid except where amended below.
 
@@ -27,18 +27,16 @@ inconsistent with these bounds is wrong.
 
 ## What changed from v1
 
-- **Playback is position-mode (D021).** Excitation protocols are played by
-  the standard position-mode `JointTrajectoryController` (ROS sim and
-  Agimus hardware alike); the fit consumes measured `q`, `dq`, and the
-  measured link-side torque `tau_J`. The fit is controller-agnostic, so the
-  v1 effort-mode trajectory controller and its controller-parity gates
-  (D015/D018 machinery, old M4 parity work) are dropped. `tau_J` is the
-  same link-side interface the MPC commands through, so friction identified
-  from it is the friction the planner needs.
-- **The artifact/contract layer is frozen (D022).** The existing schemas,
-  sealed bundles, and `validate-dataset` command are the storage boundary
-  as-is. M1 is declared complete. New contract features are added only when
-  a pipeline phase concretely needs them, as part of that phase's diff.
+- **Playback uses the stock `JointTrajectoryController` (D021, refined by
+  D027).** Excitation protocols are played by the Agimus stack's
+  `joint_trajectory_controller`, which runs in **effort mode with an
+  internal PID**; the fit consumes measured `q`, `dq` and the controller's
+  **commanded effort**. No bespoke real-time controller is written, and the
+  v1 controller-parity gates (D015/D018) are dropped.
+- **The artifact/contract layer is deleted (D024, reversing D022).** It was
+  about three quarters of the repository and served no identification
+  purpose. Artifacts are a JSON manifest, an NPZ, a content hash and a
+  `checksums.sha256`.
 - **Milestones compressed.** The pipeline is built physics-first in the
   phases below; process artifacts (reports, provenance) are produced by the
   phases that need them rather than designed up front.
@@ -78,10 +76,10 @@ inconsistent with these bounds is wrong.
 | ID | Phase | Status |
 | --- | --- | --- |
 | P0 | Foundation and model contract (old M0) | Validated |
-| P1 | Artifact contracts (old M1, frozen per D022) | Complete-frozen |
-| P2 | Sysid engine and synthetic parameter recovery | Slice 1 implemented (review open) |
-| P3 | Excitation protocol generation | Planned |
-| P4 | Standalone end-to-end pipeline | Planned |
+| P1 | Artifact contracts | Deleted (D024); replaced by `io.py` |
+| P2 | Sysid engine and synthetic parameter recovery | Implemented (review open) |
+| P3 | Excitation protocol generation | Both families implemented (campaign awaiting user review) |
+| P4 | Standalone end-to-end pipeline | Implemented — `report.py`, see `docs/identification_demo/` |
 | P5 | ROS-sim end-to-end pipeline | Planned |
 | P6 | Real-robot campaign readiness and data collection | Planned |
 | P7 | Real-model fitting and held-out validation | Planned |
@@ -120,6 +118,20 @@ or parameter is copied as truth.
 Exit gate: protocols deterministic from spec+seed; no limit violation in
 dense simulation of approach+excitation+return; conditioning materially
 better than baseline; train and held-out campaigns disjoint.
+
+### Model-acceptance rule (user requirement, 2026-07-27)
+
+The `mujoco.sysid` optimizer objective is a normalized internal residual and
+is never the basis for accepting an identified model. Acceptance is judged
+by evidence that maps to the real robot: (a) held-out open-loop prediction
+error in physical units — per-joint rad / rad·s⁻¹ and millimetres at the
+end effector — identified vs nominal, on protocols the fit never saw;
+(b) the same errors resolved by velocity regime, especially near-standstill
+and reversals (the pregrasp-relevant region), checked for consistency with
+the recorded breakaway lower bounds; (c) ultimately the pregrasp task
+itself, sim then real, against the 62 mm baseline. The physical-units
+evaluator implementing (a)+(b) is built in P4 with the pipeline that feeds
+it, and reused unchanged for the ROS simulation and the real campaign.
 
 ### P4 — Standalone end-to-end pipeline
 
@@ -195,6 +207,10 @@ compared against the 62 mm baseline.
 | D021 | 2026-07-23 | Position-mode `JointTrajectoryController` playback with measured `tau_J` as the fit torque input, in sim and on hardware. Supersedes D015 and the D018 controller-parity requirement; the fit is controller-agnostic. |
 | D022 | 2026-07-23 | Freeze the P1 artifact/contract layer as complete. New contract features only when a phase needs them, inside that phase's diff. |
 | D023 | 2026-07-23 | Adopt this v2 plan; v1 archived at `docs/archive/implementation_plan_v1.md`. v1 stop/rollback rules and scientific failure conditions remain binding. |
+| D024 | 2026-07-28 | Delete the artifact/governance layer (`artifacts/`, sealed bundles, dataset catalog, schema registry) and the superseded standalone effort plant; flatten the package. Reverses D022's freeze: the layer was ~75 % of the repository and served no identification purpose. Artifacts keep a JSON manifest, an NPZ, a content hash and `checksums.sha256` — nothing more. |
+| D025 | 2026-07-28 | Report identification the classical way, built on top of `mujoco.sysid` rather than expecting it from the toolbox: regressor condition number for excitation quality, zero-phase 4th-order Butterworth preprocessing, relative standard deviations with a 20 % freeze rule, and measured-vs-reconstructed torque plots (`diagnostics.py`, `preprocessing.py`). |
+| D026 | 2026-07-28 | Two excitation families, because one cannot serve both: friction (shared-schedule constant-velocity cruises) and inertial (per-joint Fourier series at distinct base frequencies, limit-scaled, selected by `cond(Y)`). The friction family is provably unusable for inertia — its joint velocities are perfectly correlated. |
+| D027 | 2026-07-28 | Hardware playback targets `joint_trajectory_controller/JointTrajectoryController`, already registered in the Agimus stack. It runs **effort-mode with an internal PID**, so the torque driving each joint is the JTC's commanded effort — a known quantity, which is what the fit consumes. Supersedes D021's "measured `tau_J` as the fit torque input". Open: the FR3 compensates gravity internally, so commanded effort excludes gravity; harmless for friction, must be handled explicitly before inertial identification. |
 
 ## Next review unit
 
@@ -211,6 +227,135 @@ must use short windows re-initialized from measured states
 pre-step sensor row stamped with the post-step time, and measured data must
 mirror that skew (see `MeasuredRun`), never re-stamp one side alone.
 
-Proposed P2 slice 2: armature parameter group, multistart, and the
-conditioning/uncertainty report (singular values, bound proximity) feeding
-`default_report`.
+P2 slice 2 (implemented, review open): `armature_parameters` (fitted only
+after friction, on dynamic excitation), `fit_staged` (friction → armature →
+friction-refit ordering; each stage's result persisted into every stage's
+spec), `fit_multistart` (deterministic in-bounds restarts, value-spread
+report), and conditioning evidence on `FitResult` (scaled-Jacobian singular
+values, conditioning ratio vs the 1e-6 threshold, bound proximity/hits,
+correlations vs the 0.98 freeze limit). Gate evidence in
+`tests/test_synthetic_recovery.py`: armature ≤1% on dynamic data; staged
+fit measured 13%/19% friction bias at stage 1 (wrong armature), armature
+5% at stage 2, friction ≤2% after the stage-3 refit with strict
+improvement asserted; multistart starts agree ≤1% with clean conditioning.
+`default_report` integration deliberately deferred to the P4 run-directory
+report (it generates a full artifact bundle).
+
+P2 slice 3 (implemented, review open — completes P2): `inertial_parameters`
+(per-body inertia via the toolbox's physically consistent pseudo-inertia
+parameterization; `MOVING_LINK_BODIES`/`TOOL_COMPOSITE_BODIES` encode the
+convention that the rigid tool composite is represented by link7 with
+hand/fingers frozen; includes a MuJoCo 3.10 workaround for the scalar
+`MjsBody.mass` setter in the Mass path) and `conditioning_report` — a
+pre-fit finite-difference identifiability check, the plan's freeze-before-
+fitting workflow, reusable for P3 protocol conditioning. Gate evidence:
+link3 mass recovered to 0.02%; estimating hand alongside link7 is rejected
+with conditioning ratio ~5e-25 vs ~3e-4 for the link7-composite convention
+(a 21-order-of-magnitude nullspace signature); a hidden quadratic-drag
+truth (outside the damping+frictionloss class) stalls the friction stage at
+a floor ~178x the in-class control across two amplitude regimes, and the
+subsequent armature stage stays within 7% of nominal while explaining <1%
+— detected as structured residual, not absorbed. Test suite split
+(2026-07-27): `./scripts/test` = fast development set (~3 min, excludes the
+`slow`-marked recovery fits); `./scripts/test-all` = complete 303-test gate
+suite (~12 min) required green before review handoff.
+
+P3 slice 1 (implemented, review open): `sysid/excitation.py` — friction-
+family protocols as jerk-limited trapezoids (S-curves; user decision
+2026-07-27, preferred over min-jerk because constant-velocity cruises make
+friction directly readable and plottable per speed): one bidirectional
+pass per cruise speed (default 0.05/0.15/0.4 rad/s, low speeds
+over-represented), holds at the stops, matched reversal configurations,
+seeded per-joint amplitude jitter, all-joint shared schedule. Fail-closed
+validation before anything is written: position margins, FER
+velocity/acceleration/jerk limits, array self-consistency, and an
+inverse-dynamics predicted-torque check. Bundles follow the frozen P1
+motion-protocol contract (`command_interface: joint_trajectory` per D021,
+provenance-verified source-model hash from `contracts/nominal_sources.toml`,
+checksums) and must pass `validate_motion_protocol` +
+`verify_checksum_manifest` before the writer returns; revisions are
+immutable. Gates in `tests/test_excitation.py`: determinism (identical
+`content_sha256` for identical spec), cruise-plateau presence, limit
+rejection, bundle round-trip, and (slow) a `conditioning_report` check
+that simulated playback identifies the full 14-parameter friction block
+with every per-joint frictionloss/damping correlation below the freeze
+limit. Collision checking against the experiment cell is deliberately
+deferred (needs the cell geometry; small home-centred amplitudes are safe
+by construction, and the P3-final gate still requires it before hardware).
+
+P3 slice 2 (implemented — **campaign awaiting user review**):
+`sysid/campaign.py` defines the committed campaign as fixed seeded specs —
+`fer-friction-a` (seed 101) and `fer-friction-b` (seed 102) as canonical
+protocols, `fer-friction-holdout` (seed 901, different amplitudes and
+cruise speeds) reserved for held-out validation (roles themselves are
+assigned later in dataset splits, per the P1 contract). Bundles live under
+`protocols/<id>/r1/` (100 Hz knot grid, compressed, ~250 KB each,
+byte-reproducible via the fixed campaign timestamp);
+`./scripts/generate-protocols --check` regenerates everything and compares
+content hashes, and a fast test runs the same drift guard. Review material
+in `docs/protocol_review/`: per-joint position/velocity plots (holds
+shaded, cruise speeds marked) and `summary.md` with simulated-playback
+conditioning evidence (ratios 2.4e-2/2.6e-2/3.0e-2, worst per-joint
+frictionloss/damping correlation 0.73/0.73/0.83 — all clean).
+
+**Review checkpoint (open): the user reviews the motion in
+`docs/protocol_review/` before these motions are treated as the approved
+campaign.** Changes are cheap now (edit the specs, regenerate as r2);
+after P4/P5 build on them they are not.
+
+Visual/demonstration layer added 2026-07-27 after user feedback that static
+joint plots are not reviewable and that simulated identification
+performance is the thing worth communicating (`sysid/demo.py`,
+`./scripts/identification-demo`):
+
+- an MP4 per protocol showing the arm executing the motion in MuJoCo
+  (regenerable, not committed), plus `docs/protocol_review/README.md`
+  explaining why several cruise speeds exist (one speed cannot separate the
+  Coulomb offset from the viscous slope) and what is and is not done yet;
+- a full simulated identification round in `docs/identification_demo/`:
+  hidden-truth friction of realistic magnitude (from the real breakaway
+  bounds) → play the canonical protocols → fit the 14-parameter block from
+  the frictionless nominal → judge on the **held-out** protocol in physical
+  units, with per-joint friction-curve plots (measured cruise samples,
+  truth, identified, nominal).
+
+Result of that round: **all 14 parameters recovered to three decimals**;
+held-out gripper prediction improved from **68.8 mm RMSE / 199 mm max
+(nominal) to 0.02 mm / 0.15 mm (identified)**, worst joint 0.127 → 0.0001
+rad. The nominal model's 68.8 mm held-out error landing near the real
+robot's 62 mm standoff is a useful sanity signal on the chosen truth
+magnitude — not evidence about the real robot.
+
+### Hardware readiness (settled 2026-07-28)
+
+* **Controller**: `joint_trajectory_controller/JointTrajectoryController` is
+  registered in `agimus_franka_bringup/config/controllers.yaml`. The Agimus
+  FR3 MoveIt config shows the intended Franka configuration —
+  `command_interfaces: [effort]`, `state_interfaces: [position, velocity]`,
+  gains p=600/d=30 (joints 1-4), 250/10, 150/10, 50/5. That file is
+  `fr3_*`-named; this robot is a **FER**, so an equivalent FER config
+  (`fer_joint1..7`, `arm_id: fer`) must be written here.
+* **Torque channel**: resolved. Effort-mode JTC computes the commanded
+  effort itself, so it is known exactly and needs no inference from
+  `tau_J`/`tau_J_d` semantics.
+* **Workspace**: the robot is bolted to a table and otherwise unobstructed,
+  so collision checking reduces to a table plane below the base plus the
+  existing joint limits.
+
+Remaining before hardware, two reviewed slices:
+
+* **Slice A — player**: FER controller configuration plus a node that loads
+  a protocol bundle, sends one `FollowJointTrajectory` goal, and preflights
+  (start-state match, robot mode, controller active, hashes), with a
+  controlled move to the protocol start and explicit hold/abort behaviour.
+* **Slice B — recorder and converter**: MCAP recording of the JTC commanded
+  effort and the broadcaster's measured state, converted into the
+  `MeasuredRun` the existing pipeline already consumes.
+
+Both are exercised in ROS simulation through the identical code path first;
+the hardware step then changes only the launch target.
+
+Proposed next unit — either P3 slice 3 (inertial multisine family) or,
+preferably, start P4 (standalone end-to-end pipeline) on the friction
+campaign first so the friction goal keeps moving; the inertial family can
+land while P4 is under review.
