@@ -52,6 +52,7 @@ def test_generation_is_deterministic(nominal_model: mujoco.MjModel) -> None:
     assert np.array_equal(first.dq_rad_s, second.dq_rad_s)
     assert np.array_equal(first.ddq_rad_s2, second.ddq_rad_s2)
     assert first.segments == second.segments
+    assert first.analysis_windows == second.analysis_windows
 
     reseeded = generate_friction_protocol(replace(_SPEC, seed=12), nominal_model)
     assert not np.array_equal(first.q_rad, reseeded.q_rad)
@@ -81,6 +82,20 @@ def test_sweeps_contain_constant_velocity_cruises(
         assert cruise.sum() >= 100, segment.segment_id
         checked += 1
     assert checked == 2 * len(_SPEC.cruise_speeds_rad_s)
+    assert len(compiled.analysis_windows) == checked
+    for window in compiled.analysis_windows:
+        np.testing.assert_allclose(
+            compiled.ddq_rad_s2[window.start_index : window.end_index_exclusive],
+            0.0,
+        )
+        np.testing.assert_allclose(
+            compiled.dq_rad_s[window.start_index : window.end_index_exclusive],
+            np.repeat(
+                np.asarray(window.nominal_velocity_rad_s)[None, :],
+                window.end_index_exclusive - window.start_index,
+                axis=0,
+            ),
+        )
 
 
 def test_rejects_excessive_cruise_speed(nominal_model: mujoco.MjModel) -> None:
@@ -116,7 +131,7 @@ def test_bundle_round_trip(nominal_model: mujoco.MjModel, tmp_path: Path) -> Non
     for name in ("protocol.json", "desired.npz", "checksums.sha256"):
         assert (root / name).is_file()
 
-    # Immutability: the same revision cannot be overwritten.
+    # Immutability: the canonical bundle cannot be overwritten.
     with pytest.raises(FileExistsError):
         write_protocol_bundle(
             compiled,
@@ -210,6 +225,8 @@ def test_inertial_protocol_starts_and_ends_at_rest(
     assert np.abs(compiled.dq_rad_s[-1]).max() == 0.0
     assert np.abs(compiled.ddq_rad_s2[0]).max() == 0.0
     assert np.abs(compiled.ddq_rad_s2[-1]).max() == 0.0
+    assert len(compiled.analysis_windows) == 1
+    assert compiled.analysis_windows[0].parent_segment_id == "fourier"
 
 
 def test_inertial_protocol_decorrelates_the_joints(

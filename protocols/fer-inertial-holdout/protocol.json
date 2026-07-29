@@ -1,4 +1,14 @@
 {
+  "analysis_windows": [
+    {
+      "end_index_exclusive": 2051,
+      "kind": "inertial_excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": "fourier",
+      "start_index": 50,
+      "window_id": "fourier_excitation"
+    }
+  ],
   "arrays": {
     "ddq_rad_s2": {
       "dtype": "<f8",
@@ -32,7 +42,7 @@
       "unit": "s"
     }
   },
-  "content_sha256": "8461a18c2e9fe6c32f6f4776a765d75132bbf0d6c9d3bb5881bcc7d8835b0418",
+  "content_sha256": "e53a12f8da71a81c0345c20f041f2ea63f485e04a6a65093c9751be219c6fa90",
   "created_at": "2026-07-27T00:00:00Z",
   "description": "Per-joint finite Fourier series at distinct base frequencies, scaled to the kinematic limits and selected for regressor conditioning, for armature and inertial identification.",
   "end_state": {
@@ -56,10 +66,10 @@
     ]
   },
   "family": "fer-inertial",
-  "format": "fer-mujoco-sysid/motion-protocol@2",
+  "format": "fer-mujoco-sysid/motion-protocol@3",
   "generator": {
     "name": "fer-mujoco-sysid/excitation",
-    "seed": 201,
+    "seed": 902,
     "spec": {
       "amplitude_rad": [
         0.45,
@@ -72,12 +82,12 @@
       ],
       "base_frequency_hz": [
         0.1,
-        0.15,
         0.2,
-        0.25,
         0.3,
-        0.35,
-        0.4
+        0.45,
+        0.55,
+        0.65,
+        0.75
       ],
       "candidates": 24,
       "family_id": "fer-inertial",
@@ -94,12 +104,13 @@
       "limit_margin_fraction": 0.2,
       "periods": 2,
       "position_margin_rad": 0.05,
-      "protocol_id": "fer-inertial-a",
+      "protocol_id": "fer-inertial-holdout",
+      "role": "holdout",
       "sample_period_s": 0.01,
-      "seed": 201,
+      "seed": 902,
       "settle_s": 0.5
     },
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "limits": {
     "acceleration_rad_s2": [
@@ -165,8 +176,8 @@
     "sample_period_s": 0.01,
     "samples": 2101
   },
-  "protocol_id": "fer-inertial-a",
-  "revision": "r2",
+  "protocol_id": "fer-inertial-holdout",
+  "role": "holdout",
   "segments": [
     {
       "analysis_eligible": false,

@@ -89,7 +89,7 @@ A motion protocol is the reusable asset intended to be shared in this
 repository:
 
 ```text
-protocols/<protocol_id>/<revision>/
+protocols/<protocol_id>/
   protocol.json
   desired.npz
   README.md                 # optional
@@ -99,24 +99,35 @@ protocols/<protocol_id>/<revision>/
 The compiled arrays are authoritative for playback. Generator parameters alone
 are not sufficient because a generator can change between software versions.
 The protocol records both the compiled motion and the generator provenance.
+There is one canonical bundle per protocol identifier. Its
+`content_sha256`—not a mutable “latest revision” label—is the identity copied
+into playback markers and recordings; Git history preserves earlier source
+states.
 
 `desired.npz` contains:
 
 | Key | Shape | Dtype | Meaning |
 | --- | --- | --- | --- |
-| `time_from_start_ns` | `(N,)` | `<i8` | Exact trajectory knot time |
+| `time_s` | `(N,)` | `<f8` | Trajectory knot time from protocol start |
 | `q_rad` | `(N, 7)` | `<f8` | Desired joint position |
 | `dq_rad_s` | `(N, 7)` | `<f8` | Desired joint velocity |
 | `ddq_rad_s2` | `(N, 7)` | `<f8` | Desired joint acceleration |
 
 Time begins at zero and is strictly increasing. The manifest records the
-command interface, exact sample period, segment boundaries, start/end
-requirements, source model and scene, end effector and payload, generator
-version and deterministic seed. The continuous interpolation/playback contract
-is finalized with the player in M3; it is not inferred by the M1a validator.
+command interface, exact sample period, explicit excitation `family`, explicit
+`train`/`holdout` role, segment boundaries, fit-eligible `analysis_windows`,
+start/end requirements, source model and scene, end effector and payload,
+generator version and deterministic seed. Family and role are never inferred
+from the protocol identifier. A recording preserves this metadata and the
+protocol content hash, so analysis cannot silently pool families or promote a
+holdout into training data.
 
-Fit, development, and held-out roles do not belong to a protocol. They belong
-to a versioned dataset split.
+Analysis windows are half-open index intervals into the compiled arrays.
+Friction windows contain only exact constant-velocity, zero-acceleration
+cruises; inertial windows contain only the Fourier excitation. Recording-clock
+masks keep an additional 0.1 s inside each edge to exclude filtering and
+telemetry leakage from ramps, reversals, and settle phases. This selection does
+not trim the raw bag or recording arrays.
 
 A future machine-generated simulation record will bind the protocol to the
 model, scene, payload, and constraint-profile digests that were checked. The

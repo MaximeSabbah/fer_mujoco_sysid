@@ -15,13 +15,25 @@ import numpy as np
 import pytest
 
 from fer_mujoco_sysid.export import (
+    BodyInertial,
+    ConsumerModelExportCheck,
     ExportCheck,
     ExportError,
     IdentifiedParameters,
+    apply_parameters,
+    export_consumer_model,
+    export_full_source_patched_model,
     export_identified_model,
+    spec_to_xml_exact_dynamics,
+    verify_consumer_model_export,
     verify_export,
 )
-from fer_mujoco_sysid.model import HYDRAX_ARM_JOINT_NAMES, ModelPaths
+from fer_mujoco_sysid.model import (
+    HYDRAX_ARM_JOINT_NAMES,
+    ModelPaths,
+    build_hydrax_arm_model,
+    build_hydrax_arm_spec,
+)
 
 _FRICTION = (1.40, 1.20, 1.10, 1.50, 0.35, 1.10, 0.55)
 _DAMPING = (2.00, 1.80, 1.50, 1.90, 0.80, 0.70, 0.50)
@@ -77,6 +89,9 @@ def test_manifest_pins_both_models_by_hash(
     """A model without provenance cannot be traced back to what produced it."""
     manifest = json.loads((tmp_path / "identified.json").read_text())
     assert manifest["format"] == "fer-mujoco-sysid/identified-model@1"
+    assert manifest["artifact_kind"] == "full-source-parameter-patch"
+    assert manifest["consumer_ready"] is False
+    assert "consumer planning derivation not validated" in manifest["validation_scope"]
     assert len(manifest["source_model"]["sha256"]) == 64
     assert len(manifest["exported_model"]["sha256"]) == 64
     assert manifest["exported_fields"] == ["armature", "damping", "frictionloss"]
@@ -110,7 +125,7 @@ def test_a_model_that_changed_something_else_is_rejected(
     spec.body("link3").mass = float(spec.body("link3").mass) * 1.05
     tampered = tmp_path / "tampered.xml"
     spec.compile()
-    tampered.write_text(spec.to_xml(), encoding="utf-8")
+    tampered.write_text(spec_to_xml_exact_dynamics(spec), encoding="utf-8")
 
     with pytest.raises(ExportError, match="body_mass"):
         verify_export(model_paths.hydrax, tampered, parameters)
@@ -138,9 +153,245 @@ def test_partial_exports_touch_only_what_was_fitted(
 
     nominal = mujoco.MjModel.from_xml_path(str(model_paths.hydrax))
     identified = mujoco.MjModel.from_xml_path(str(destination))
-    np.testing.assert_allclose(
-        identified.dof_armature, nominal.dof_armature, rtol=1e-5
+    np.testing.assert_allclose(identified.dof_armature, nominal.dof_armature, rtol=1e-5)
+
+
+def _armature_and_body_parameters(model_paths: ModelPaths) -> IdentifiedParameters:
+    nominal = mujoco.MjModel.from_xml_path(str(model_paths.hydrax))
+    body = BodyInertial.from_model(nominal, "link3")
+    return IdentifiedParameters(
+        armature=_ARMATURE,
+        body_inertials=(
+            BodyInertial(
+                body="link3",
+                mass=body.mass * 1.08,
+                ipos=tuple(np.asarray(body.ipos) + np.array((0.003, -0.002, 0.004))),
+                inertia=tuple(np.asarray(body.inertia) * 1.05),
+            ),
+        ),
     )
+
+
+def test_armature_and_body_inertials_export_exactly_together(
+    tmp_path: Path, model_paths: ModelPaths
+) -> None:
+    parameters = _armature_and_body_parameters(model_paths)
+    destination = tmp_path / "armature_and_body.xml"
+    manifest_path = tmp_path / "armature_and_body.json"
+
+    check = export_identified_model(
+        destination,
+        parameters,
+        source_path=model_paths.hydrax,
+        manifest_path=manifest_path,
+    )
+    written = mujoco.MjModel.from_xml_path(str(destination))
+    written_body = BodyInertial.from_model(written, "link3")
+    wanted_body = parameters.body_inertials[0]
+
+    assert written_body.mass == pytest.approx(wanted_body.mass, rel=1e-5)
+    np.testing.assert_allclose(
+        written_body.ipos, wanted_body.ipos, rtol=1e-5, atol=1e-8
+    )
+    np.testing.assert_allclose(
+        written_body.inertia, wanted_body.inertia, rtol=1e-5, atol=1e-8
+    )
+    for index, name in enumerate(HYDRAX_ARM_JOINT_NAMES):
+        dof = int(written.joint(name).dofadr[0])
+        assert written.dof_armature[dof] == pytest.approx(_ARMATURE[index], rel=1e-5)
+    assert set(check.body_changes["link3"]) == {"mass", "ipos", "inertia"}
+    assert check.roundtrip_error < 1e-5
+    assert "link3" in check.table()
+
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["exported_fields"] == ["armature", "body_inertials"]
+    assert manifest["parameters"]["body_inertials"]["link3"]["mass"] == pytest.approx(
+        wanted_body.mass
+    )
+    restored = IdentifiedParameters.from_mapping(
+        manifest["parameters"] | {"joints": manifest["joints"]}
+    )
+    assert restored == parameters
+
+
+def test_from_model_captures_exact_armature_and_body_values(
+    model_paths: ModelPaths,
+) -> None:
+    wanted = _armature_and_body_parameters(model_paths)
+    spec = mujoco.MjSpec.from_file(str(model_paths.hydrax))
+    fitted = apply_parameters(spec, wanted).compile()
+
+    captured = IdentifiedParameters.from_model(
+        fitted,
+        bodies=("link3",),
+        include_frictionloss=False,
+        include_damping=False,
+    )
+
+    assert captured.armature == pytest.approx(_ARMATURE)
+    assert captured.body_inertials[0].mass == pytest.approx(
+        wanted.body_inertials[0].mass
+    )
+    np.testing.assert_allclose(
+        captured.body_inertials[0].ipos,
+        wanted.body_inertials[0].ipos,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        captured.body_inertials[0].inertia,
+        wanted.body_inertials[0].inertia,
+        rtol=1e-9,
+        atol=5e-12,
+    )
+
+
+def test_body_export_still_rejects_a_structural_edit(
+    tmp_path: Path, model_paths: ModelPaths
+) -> None:
+    parameters = _armature_and_body_parameters(model_paths)
+    spec = mujoco.MjSpec.from_file(str(model_paths.hydrax))
+    spec.meshdir = str((model_paths.hydrax.parent / spec.meshdir).resolve())
+    spec.texturedir = str((model_paths.hydrax.parent / spec.texturedir).resolve())
+    apply_parameters(spec, parameters)
+    geom = spec.geoms[0]
+    position = np.asarray(geom.pos, dtype=np.float64).copy()
+    position[0] += 0.01
+    geom.pos = position
+    tampered = tmp_path / "body_with_tampered_geom.xml"
+    spec.compile()
+    tampered.write_text(spec_to_xml_exact_dynamics(spec), encoding="utf-8")
+
+    with pytest.raises(ExportError, match="geom_pos"):
+        verify_export(model_paths.hydrax, tampered, parameters)
+
+
+def _accepted_fitted_model(
+    model_paths: ModelPaths, parameters: IdentifiedParameters
+) -> mujoco.MjModel:
+    spec = build_hydrax_arm_spec(
+        model_paths.hydrax,
+        joint_state_sensors=True,
+    )
+    spec.option.gravity = [0.0, 0.0, 0.0]
+    apply_parameters(spec, parameters)
+    return spec.compile()
+
+
+def test_consumer_export_validates_full_and_hydrax_planning_loads(
+    tmp_path: Path, model_paths: ModelPaths
+) -> None:
+    parameters = _armature_and_body_parameters(model_paths)
+    accepted = _accepted_fitted_model(model_paths, parameters)
+    destination = tmp_path / "fer_consumer.xml"
+
+    check = export_consumer_model(
+        destination,
+        parameters,
+        accepted_fitted_model=accepted,
+        source_path=model_paths.hydrax,
+    )
+
+    assert isinstance(check, ConsumerModelExportCheck)
+    full = mujoco.MjModel.from_xml_path(str(destination))
+    assert (full.nq, full.nv, full.nu, full.njnt, full.neq) == (9, 9, 8, 9, 1)
+    assert full.joint("finger_joint1").name == "finger_joint1"
+    np.testing.assert_allclose(full.opt.gravity, (0.0, 0.0, -9.81))
+    assert not (int(full.opt.disableflags) & int(mujoco.mjtDisableBit.mjDSBL_CONTACT))
+    assert int(full.opt.integrator) == int(mujoco.mjtIntegrator.mjINT_EULER)
+
+    planning = build_hydrax_arm_model(destination)
+    assert (planning.nq, planning.nv, planning.nu, planning.njnt, planning.neq) == (
+        7,
+        7,
+        7,
+        7,
+        0,
+    )
+    np.testing.assert_allclose(planning.opt.gravity, (0.0, 0.0, -9.81))
+    assert int(planning.opt.disableflags) & int(mujoco.mjtDisableBit.mjDSBL_CONTACT)
+    assert int(planning.opt.integrator) == int(mujoco.mjtIntegrator.mjINT_IMPLICITFAST)
+    assert check.planning_compiled_error < 2e-5
+    assert check.planning_behavior_error < 1e-4
+    assert check.fit_convention_behavior_error < 1e-4
+
+    manifest = json.loads(destination.with_suffix(".json").read_text())
+    assert manifest["format"] == "fer-mujoco-sysid/consumer-model@1"
+    assert manifest["artifact_kind"] == "gravity-enabled-full-panda-consumer-model"
+    assert manifest["consumer_ready"] is True
+    assert len(manifest["source_model"]["sha256"]) == 64
+    assert manifest["projection"]["removed_source_joint_names"] == [
+        "finger_joint1",
+        "finger_joint2",
+    ]
+    assert manifest["projection"]["removed_source_actuator_names"] == ["actuator8"]
+    assert manifest["projection"]["source_equality_count"] == 1
+    assert manifest["projection"]["planning_equality_count"] == 0
+    conventions = manifest["simulation_conventions"]
+    assert conventions["accepted_fit"]["gravity_enabled"] is False
+    assert conventions["full_consumer_model"]["gravity_enabled"] is True
+    assert conventions["full_consumer_model"]["contacts_enabled"] is True
+    assert conventions["hydrax_planning_model"]["gravity_enabled"] is True
+    assert conventions["hydrax_planning_model"]["contacts_enabled"] is False
+    assert (
+        conventions["hydrax_planning_model"]["integrator"]["name"]
+        == "mjINT_IMPLICITFAST"
+    )
+    torque = conventions["torque_semantics"]
+    assert torque["mppi_inverse_dynamics_includes_gravity"] is True
+    assert torque["real_lfc_remove_gravity_compensation_effort"] is True
+    assert torque["simulation_remove_gravity_compensation_effort"] is False
+    assert manifest["verification"]["ordinary_full_mjmodel_reload"] is True
+    assert manifest["verification"]["hydrax_planning_derivation_reload"] is True
+
+
+def test_consumer_verifier_rejects_a_changed_gravity_convention(
+    tmp_path: Path, model_paths: ModelPaths
+) -> None:
+    parameters = _armature_and_body_parameters(model_paths)
+    accepted = _accepted_fitted_model(model_paths, parameters)
+    destination = tmp_path / "consumer.xml"
+    export_full_source_patched_model(
+        destination,
+        parameters,
+        source_path=model_paths.hydrax,
+    )
+
+    text = destination.read_text()
+    destination.write_text(
+        text.replace(
+            '<mujoco model="panda">',
+            '<mujoco model="panda">\n  <option gravity="0 0 0"/>',
+            1,
+        )
+    )
+
+    with pytest.raises(ExportError, match="opt.gravity|lost gravity"):
+        verify_consumer_model_export(
+            accepted,
+            destination,
+            parameters,
+            source_path=model_paths.hydrax,
+        )
+
+
+def test_consumer_export_refuses_a_non_gravity_free_fit_before_writing(
+    tmp_path: Path, model_paths: ModelPaths
+) -> None:
+    parameters = IdentifiedParameters(armature=_ARMATURE)
+    spec = build_hydrax_arm_spec(model_paths.hydrax)
+    apply_parameters(spec, parameters)
+    gravity_enabled_fit = spec.compile()
+    destination = tmp_path / "must_not_exist.xml"
+
+    with pytest.raises(ExportError, match="gravity-free Franka telemetry"):
+        export_consumer_model(
+            destination,
+            parameters,
+            accepted_fitted_model=gravity_enabled_fit,
+            source_path=model_paths.hydrax,
+        )
+    assert not destination.exists()
 
 
 def test_exported_model_is_not_pinned_to_this_machine(

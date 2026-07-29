@@ -9,9 +9,12 @@ set -euo pipefail
 #   ./scripts/run-protocol fer-friction-a --backend real --robot-ip 172.16.0.2
 #   ./scripts/run-protocol fer-inertial-a --backend real --robot-ip ... --speed-scale 0.5
 #   ./scripts/run-protocol fer-friction-a --backend real --robot-ip ... --dry-run
+#   ./scripts/run-protocol fer-friction-a --backend real --robot-ip ... \
+#     --allow-real-approach
+#   ./scripts/run-protocol fer-friction-a --backend mujoco_ros --record
 #
-# The first argument is a protocol id from protocols/ (its newest revision is
-# used) or a path to a bundle revision directory.
+# The first argument is a protocol id from protocols/ or a path to a canonical
+# bundle directory.
 #
 # Two environments, on purpose. The simulation scene is generated in the
 # project's uv environment, which owns MuJoCo. Everything under ROS runs on
@@ -40,17 +43,20 @@ esac
 PROTOCOL_ARGUMENT="$1"
 shift
 
-BACKEND="mujoco"
+BACKEND="mujoco_ros"
 START_OFFSET_RAD="0.1"
 RECORD_ROOT=""
-PLANT_FRICTION=""
+PLANT_PARAMETERS=""
+TRUTH_MANIFEST=""
+SIMULATION_PARAMETERS_REQUESTED="false"
 SPEED_SCALE="1.0"
+ALLOW_REAL_APPROACH="false"
+DRY_RUN="false"
 LAUNCH_ARGUMENTS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --backend)
       BACKEND="$2"
-      LAUNCH_ARGUMENTS+=("backend:=$2")
       shift 2
       ;;
     --robot-ip)
@@ -67,7 +73,13 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --dry-run)
+      DRY_RUN="true"
       LAUNCH_ARGUMENTS+=("dry_run:=true")
+      shift
+      ;;
+    --allow-real-approach)
+      ALLOW_REAL_APPROACH="true"
+      LAUNCH_ARGUMENTS+=("allow_real_approach:=true")
       shift
       ;;
     --viewer)
@@ -96,10 +108,24 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --simulation-truth)
+      # Simulation only: use and lineage-bind an explicit full truth manifest.
+      SIMULATION_PARAMETERS_REQUESTED="true"
+      TRUTH_MANIFEST="$2"
+      PLANT_PARAMETERS="$2"
+      shift 2
+      ;;
+    --parameters)
+      # Custom simulation plant parameters. This is not accepted as numerical
+      # truth unless supplied through --simulation-truth.
+      SIMULATION_PARAMETERS_REQUESTED="true"
+      PLANT_PARAMETERS="$2"
+      shift 2
+      ;;
     --friction)
-      # Simulation only: give the plant known friction, so a fit from the
-      # recording has something to recover that it was never told.
-      PLANT_FRICTION="$2"
+      # Deprecated compatibility alias for --parameters.
+      SIMULATION_PARAMETERS_REQUESTED="true"
+      PLANT_PARAMETERS="$2"
       shift 2
       ;;
     *)
@@ -109,17 +135,48 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Resolve a protocol id to its newest committed revision.
+if [[ "${BACKEND}" == "mujoco" ]]; then
+  # Compatibility alias. Public provenance and output naming use mujoco_ros;
+  # the launch file keeps "mujoco" as its internal hardware-plugin selector.
+  BACKEND="mujoco_ros"
+fi
+if [[ "${BACKEND}" != "mujoco_ros" && "${BACKEND}" != "real" ]]; then
+  echo "backend must be 'mujoco_ros' or 'real', got '${BACKEND}'" >&2
+  exit 1
+fi
+if [[ "${ALLOW_REAL_APPROACH}" == "true" && "${BACKEND}" != "real" ]]; then
+  echo "--allow-real-approach is only meaningful with --backend real" >&2
+  exit 1
+fi
+if [[
+  "${BACKEND}" == "real" &&
+    "${SIMULATION_PARAMETERS_REQUESTED}" == "true"
+]]; then
+  echo \
+    "--simulation-truth, --parameters, and --friction are simulation-only; " \
+    "they cannot be used with --backend real" >&2
+  exit 1
+fi
+
+# Resolve caller-relative inputs once, before the scene-building subshell
+# changes directory to the repository. `-m` also supports a new recording root.
+if [[ -n "${TRUTH_MANIFEST}" ]]; then
+  TRUTH_MANIFEST="$(realpath -m -- "${TRUTH_MANIFEST}")"
+  PLANT_PARAMETERS="${TRUTH_MANIFEST}"
+elif [[ -n "${PLANT_PARAMETERS}" ]]; then
+  PLANT_PARAMETERS="$(realpath -m -- "${PLANT_PARAMETERS}")"
+fi
+
+# Resolve a protocol id to its one committed canonical bundle.
 if [[ -d "${PROTOCOL_ARGUMENT}" ]]; then
   PROTOCOL_PATH="$(cd "${PROTOCOL_ARGUMENT}" && pwd)"
-elif [[ -d "${REPOSITORY}/protocols/${PROTOCOL_ARGUMENT}" ]]; then
-  PROTOCOL_PATH="$(
-    find "${REPOSITORY}/protocols/${PROTOCOL_ARGUMENT}" -mindepth 1 -maxdepth 1 -type d |
-      sort | tail -n 1
-  )"
+elif [[ -f "${REPOSITORY}/protocols/${PROTOCOL_ARGUMENT}/protocol.json" ]]; then
+  PROTOCOL_PATH="${REPOSITORY}/protocols/${PROTOCOL_ARGUMENT}"
 else
   echo "unknown protocol '${PROTOCOL_ARGUMENT}'. Available:" >&2
-  find "${REPOSITORY}/protocols" -mindepth 1 -maxdepth 1 -type d -printf '  %f\n' | sort >&2
+  for candidate in "${REPOSITORY}"/protocols/*/protocol.json; do
+    [[ -f "${candidate}" ]] && printf '  %s\n' "$(basename "$(dirname "${candidate}")")"
+  done | sort >&2
   exit 1
 fi
 
@@ -128,10 +185,40 @@ if [[ ! -f "${PROTOCOL_PATH}/protocol.json" ]]; then
   exit 1
 fi
 
+PROTOCOL_ID="$(basename "${PROTOCOL_PATH}")"
+# Results are partitioned by where the data came from, under one output root.
+# "mujoco_ros" is this ROS stack against a simulated plant; "mujoco" is
+# reserved for the standalone in-process pipeline, which never touches ROS.
+if [[ "${BACKEND}" == "real" ]]; then
+  RECORD_BACKEND="real"
+else
+  RECORD_BACKEND="mujoco_ros"
+fi
+if [[ "${RECORD_ROOT}" == "default" ]]; then
+  RECORD_ROOT="${REPOSITORY}/output/${RECORD_BACKEND}"
+fi
+if [[ -n "${RECORD_ROOT}" ]]; then
+  RECORD_ROOT="$(realpath -m -- "${RECORD_ROOT}")"
+  RUN_DIR="${RECORD_ROOT}/${PROTOCOL_ID}"
+  if [[ -e "${RUN_DIR}" ]]; then
+    echo "recording destination already exists: ${RUN_DIR}" >&2
+    echo "recordings are immutable; choose a new --record root" >&2
+    exit 1
+  fi
+  mkdir -p "${RECORD_ROOT}"
+  mkdir "${RUN_DIR}"
+  LAUNCH_ARGUMENTS+=("record:=${RUN_DIR}/raw")
+fi
+
 if [[ "${BACKEND}" == "real" ]]; then
   echo
   echo "  About to command the REAL robot."
   echo "  protocol : ${PROTOCOL_PATH}"
+  if [[ "${ALLOW_REAL_APPROACH}" == "true" ]]; then
+    echo "  approach : EXPLICITLY ENABLED — watch the arm throughout."
+  else
+    echo "  approach : disabled; the arm must already be at protocol start."
+  fi
   echo "  Keep a hand on the emergency stop. Ctrl-C cancels the trajectory."
   echo
 fi
@@ -140,17 +227,39 @@ fi
 # project's own environment. Nothing inside a ROS process imports MuJoCo: a
 # ROS environment carries whatever `mujoco` its own packages put on the path,
 # and the player must not depend on which one wins.
-if [[ "${BACKEND}" == "mujoco" ]]; then
+if [[ "${BACKEND}" == "mujoco_ros" ]]; then
   SCENE_DIRECTORY="$(mktemp -d -t fer_sysid_scene.XXXXXX)"
   trap 'rm -rf "${SCENE_DIRECTORY}"' EXIT
+  if [[ -z "${PLANT_PARAMETERS}" ]]; then
+    if [[ -n "${RECORD_ROOT}" ]]; then
+      TRUTH_MANIFEST="${RECORD_ROOT}/simulation_truth.json"
+    else
+      TRUTH_MANIFEST="${SCENE_DIRECTORY}/simulation_truth.json"
+    fi
+    (
+      cd "${REPOSITORY}"
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --locked python -m \
+        fer_mujoco_sysid.simulation_truth "${TRUTH_MANIFEST}"
+    ) >/dev/null
+    PLANT_PARAMETERS="${TRUTH_MANIFEST}"
+  fi
   (
     cd "${REPOSITORY}"
+    SCENE_ARGUMENTS=(
+      "${SCENE_DIRECTORY}/scene.xml"
+      --offset-rad "${START_OFFSET_RAD}"
+      --parameters "${PLANT_PARAMETERS}"
+    )
     PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --locked python -m \
-      fer_mujoco_sysid.ros.scene "${SCENE_DIRECTORY}/scene.xml" \
-      --offset-rad "${START_OFFSET_RAD}" \
-      ${PLANT_FRICTION:+--friction "${PLANT_FRICTION}"}
+      fer_mujoco_sysid.ros.scene "${SCENE_ARGUMENTS[@]}"
   ) >/dev/null
   LAUNCH_ARGUMENTS+=("mujoco_scene:=${SCENE_DIRECTORY}/scene.xml")
+fi
+
+if [[ "${BACKEND}" == "real" ]]; then
+  LAUNCH_ARGUMENTS+=("backend:=real")
+else
+  LAUNCH_ARGUMENTS+=("backend:=mujoco")
 fi
 
 # The ROS setup scripts read unset variables; -u would abort on them.
@@ -165,37 +274,30 @@ set -u
 
 export PYTHONPATH="${REPOSITORY}/src${PYTHONPATH:+:${PYTHONPATH}}"
 
-PROTOCOL_ID="$(basename "$(dirname "${PROTOCOL_PATH}")")"
-# Results are partitioned by where the data came from, under one output root.
-# "mujoco_ros" is this ROS stack against a simulated plant; "mujoco" is
-# reserved for the standalone in-process pipeline, which never touches ROS.
-if [[ "${BACKEND}" == "real" ]]; then
-  RECORD_BACKEND="real"
-else
-  RECORD_BACKEND="mujoco_ros"
-fi
-if [[ "${RECORD_ROOT}" == "default" ]]; then
-  RECORD_ROOT="${REPOSITORY}/output/${RECORD_BACKEND}"
-fi
-if [[ -n "${RECORD_ROOT}" ]]; then
-  RUN_DIR="${RECORD_ROOT}/${PROTOCOL_ID}"
-  mkdir -p "${RUN_DIR}"
-  LAUNCH_ARGUMENTS+=("record:=${RUN_DIR}/raw")
-fi
-
+set +e
 ros2 launch "${REPOSITORY}/launch/play_protocol.launch.py" \
   "protocol:=${PROTOCOL_PATH}" "${LAUNCH_ARGUMENTS[@]}"
 LAUNCH_STATUS=$?
+set -e
 
-if [[ -n "${RECORD_ROOT}" && ${LAUNCH_STATUS} -eq 0 ]]; then
+if [[ -n "${RECORD_ROOT}" && ${LAUNCH_STATUS} -eq 0 && "${DRY_RUN}" == "false" ]]; then
   echo
   echo "converting the recording ..."
+  CONVERT_ARGUMENTS=(
+    "${RUN_DIR}/raw" "${RUN_DIR}/recording"
+    --protocol "${PROTOCOL_PATH}"
+    --speed-scale "${SPEED_SCALE}"
+    --backend "${RECORD_BACKEND}"
+  )
+  if [[ -n "${TRUTH_MANIFEST}" ]]; then
+    CONVERT_ARGUMENTS+=(--simulation-truth "${TRUTH_MANIFEST}")
+  fi
   PYTHONPATH="${REPOSITORY}/src${PYTHONPATH:+:${PYTHONPATH}}" \
     python3 -m fer_mujoco_sysid.ros.convert \
-      "${RUN_DIR}/raw" "${RUN_DIR}/recording" \
-      --protocol "${PROTOCOL_PATH}" \
-      --speed-scale "${SPEED_SCALE}" \
-      --backend "${RECORD_BACKEND}"
+      "${CONVERT_ARGUMENTS[@]}"
   exit $?
+fi
+if [[ -n "${RECORD_ROOT}" && "${DRY_RUN}" == "true" ]]; then
+  echo "dry run completed; no protocol dataset was produced"
 fi
 exit ${LAUNCH_STATUS}

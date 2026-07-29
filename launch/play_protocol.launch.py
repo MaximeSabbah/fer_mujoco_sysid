@@ -17,7 +17,6 @@ import os
 import sys
 from pathlib import Path
 
-from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
@@ -32,6 +31,8 @@ from launch.substitutions import Command, FindExecutable, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterFile, ParameterValue
 
+from launch import LaunchDescription
+
 REPOSITORY = Path(__file__).resolve().parents[1]
 CONTROLLERS_FILE = REPOSITORY / "config" / "fer_sysid_controllers.yaml"
 ARM_CONTROLLER = "fer_sysid_arm_controller"
@@ -42,6 +43,8 @@ SPAWNER_TIMEOUT = "30"
 #: the description's remaining joints into /joint_states.
 ARM_JOINT_STATES_TOPIC = "/arm/joint_states"
 FRANKA_STATE_TOPIC = "/franka_robot_state_broadcaster/robot_state"
+PROTOCOL_EVENT_TOPIC = "/fer_sysid/protocol_event"
+RECORDER_NAME = "fer_sysid_recorder"
 FINGER_OPEN_M = 0.04
 
 
@@ -59,7 +62,9 @@ def launch_setup(context, *args, **kwargs):
 
     protocol = _argument(context, "protocol")
     if not protocol:
-        raise RuntimeError("protocol:=<path to a bundle revision directory> is required")
+        raise RuntimeError(
+            "protocol:=<path to a canonical bundle directory> is required"
+        )
     protocol_path = Path(protocol).resolve()
     if not (protocol_path / "protocol.json").is_file():
         raise RuntimeError(f"{protocol_path} does not hold a protocol bundle")
@@ -227,10 +232,17 @@ def launch_setup(context, *args, **kwargs):
     # from it, so a dataset can always be rebuilt without re-running the robot.
     record_dir = _argument(context, "record")
     if record_dir:
+        resolved_record_dir = Path(record_dir).resolve()
+        if resolved_record_dir.exists():
+            raise RuntimeError(
+                f"recording destination already exists: {resolved_record_dir}. "
+                "A run is immutable; choose a new destination."
+            )
         topics = [
             ARM_JOINT_STATES_TOPIC,
             f"/{ARM_CONTROLLER}/controller_state",
             "/dynamic_joint_states",
+            PROTOCOL_EVENT_TOPIC,
         ]
         if is_mujoco:
             topics.append("/clock")
@@ -240,15 +252,29 @@ def launch_setup(context, *args, **kwargs):
             # the commanded effort, because re-running the robot to get a
             # channel we chose not to record is the expensive mistake.
             topics.append(FRANKA_STATE_TOPIC)
+        recorder_command = [
+            "ros2",
+            "bag",
+            "record",
+            "--storage",
+            "mcap",
+            "--output",
+            str(resolved_record_dir),
+            "--node-name",
+            RECORDER_NAME,
+            "--start-paused",
+            "--disable-keyboard-controls",
+        ]
+        if is_mujoco:
+            recorder_command.append("--use-sim-time")
+        recorder_command.extend(["--topics", *topics])
         actions.append(
             ExecuteProcess(
-                cmd=[
-                    "ros2", "bag", "record",
-                    "--storage", "mcap",
-                    "--output", str(Path(record_dir).resolve()),
-                    *topics,
-                ],
+                cmd=recorder_command,
                 output="log",
+                # If recording cannot start or dies mid-run, stop the whole
+                # launch before the player can continue commanding motion.
+                on_exit=Shutdown(),
             )
         )
 
@@ -266,6 +292,12 @@ def launch_setup(context, *args, **kwargs):
                 "controller_manager": CONTROLLER_MANAGER,
                 "joint_states_topic": ARM_JOINT_STATES_TOPIC,
                 "require_robot_state": not is_mujoco,
+                "allow_real_approach": ParameterValue(
+                    LaunchConfiguration("allow_real_approach"), value_type=bool
+                ),
+                "require_recorder": bool(record_dir),
+                "recorder_name": f"/{RECORDER_NAME}",
+                "protocol_event_topic": PROTOCOL_EVENT_TOPIC,
                 "speed_scale": ParameterValue(
                     LaunchConfiguration("speed_scale"), value_type=float
                 ),
@@ -294,11 +326,13 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "backend",
                 default_value="mujoco",
-                description="'mujoco' for the simulated rehearsal, 'real' for the robot.",
+                description=(
+                    "'mujoco' for the simulated rehearsal, 'real' for the robot."
+                ),
             ),
             DeclareLaunchArgument(
                 "protocol",
-                description="Path to a protocol bundle revision directory.",
+                description="Path to a canonical protocol bundle directory.",
             ),
             DeclareLaunchArgument(
                 "speed_scale",
@@ -310,6 +344,13 @@ def generate_launch_description() -> LaunchDescription:
                 "approach_speed_rad_s",
                 default_value="0.2",
                 description="Joint speed cap for the move to the protocol start.",
+            ),
+            DeclareLaunchArgument(
+                "allow_real_approach",
+                default_value="false",
+                description="Explicitly permit the move-to-start on hardware. "
+                "Simulation approaches automatically; real runs otherwise "
+                "require the arm to be at the reviewed start pose.",
             ),
             DeclareLaunchArgument(
                 "dry_run",

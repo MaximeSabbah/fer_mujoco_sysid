@@ -77,6 +77,18 @@ def test_lowpass_handles_short_windows() -> None:
     assert lowpass(short, _RATE_HZ).shape == short.shape
 
 
+def test_disabled_filter_preserves_exact_simulation_rows() -> None:
+    values = np.random.default_rng(2).standard_normal((100, 7))
+    settings = FilterSettings(enabled=False)
+    unfiltered = lowpass(values, _RATE_HZ, settings)
+
+    np.testing.assert_array_equal(unfiltered, values)
+    assert unfiltered is not values
+    description = settings.describe(_RATE_HZ)
+    assert description["kind"] == "none"
+    assert description["enabled"] is False
+
+
 def test_central_difference_matches_analytic_derivative() -> None:
     time = _time()
     values = np.column_stack([np.sin(2 * np.pi * 1.0 * time)])

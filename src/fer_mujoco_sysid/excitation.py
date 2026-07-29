@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import datetime
 import tomllib
-from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -25,10 +24,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fer_mujoco_sysid.io import (
-    ArtifactError,
     content_sha256,
-    load_arrays,
-    read_json,
     save_arrays,
     sha256_file,
     verify_checksums,
@@ -38,14 +34,23 @@ from fer_mujoco_sysid.io import (
 from fer_mujoco_sysid.model import build_hydrax_arm_spec
 from fer_mujoco_sysid.protocol import (
     ARRAY_UNITS,
+    FRICTION_CRUISE,
+    FRICTION_FAMILY,
+    INERTIAL_EXCITATION,
+    INERTIAL_FAMILY,
     PROTOCOL_FORMAT,
+    PROTOCOL_ROLES,
     ROS_ARM_JOINT_NAMES,
-    load_protocol_bundle,
+    TRAIN_ROLE,
+    AnalysisWindow,
     validate_protocol_manifest,
+)
+from fer_mujoco_sysid.protocol import (
+    load_protocol_bundle as load_protocol_bundle,
 )
 
 GENERATOR_NAME = "fer-mujoco-sysid/excitation"
-GENERATOR_VERSION = "0.1.0"
+GENERATOR_VERSION = "0.2.0"
 
 # FER joint limits (joint1..7) from the Franka Control Interface
 # documentation. The generator's margins keep protocols well inside them;
@@ -85,7 +90,8 @@ class FrictionProtocolSpec:
 
     protocol_id: str
     seed: int
-    family_id: str = "fer-friction"
+    family_id: str = FRICTION_FAMILY
+    role: str = TRAIN_ROLE
     amplitudes_rad: tuple[float, ...] = (0.3,) * 7
     amplitude_jitter: float = 0.1
     cruise_speeds_rad_s: tuple[float, ...] = (0.05, 0.15, 0.4)
@@ -111,14 +117,15 @@ class Segment:
 
 @dataclass(frozen=True)
 class CompiledProtocol:
-    """Compiled friction protocol: dense arrays plus segment labels."""
+    """Compiled protocol: dense arrays, segments, and fit-eligible windows."""
 
-    spec: FrictionProtocolSpec
+    spec: FrictionProtocolSpec | InertialProtocolSpec
     time_s: NDArray[np.float64]
     q_rad: NDArray[np.float64]
     dq_rad_s: NDArray[np.float64]
     ddq_rad_s2: NDArray[np.float64]
     segments: tuple[Segment, ...]
+    analysis_windows: tuple[AnalysisWindow, ...]
 
     def arrays(self) -> dict[str, NDArray[np.float64]]:
         return {
@@ -127,6 +134,23 @@ class CompiledProtocol:
             "dq_rad_s": self.dq_rad_s,
             "ddq_rad_s2": self.ddq_rad_s2,
         }
+
+
+def _validate_protocol_identity(
+    spec: FrictionProtocolSpec | InertialProtocolSpec, *, expected_family: str
+) -> None:
+    """Require identity metadata from the typed spec, never from its name."""
+    if not spec.protocol_id.strip():
+        raise ValueError("protocol_id cannot be empty")
+    if spec.family_id != expected_family:
+        raise ValueError(
+            f"{type(spec).__name__} family must be {expected_family!r}, "
+            f"got {spec.family_id!r}"
+        )
+    if spec.role not in PROTOCOL_ROLES:
+        raise ValueError(
+            f"protocol role must be one of {PROTOCOL_ROLES}, got {spec.role!r}"
+        )
 
 
 def _scurve_profile(
@@ -186,6 +210,7 @@ def generate_friction_protocol(
     model_path: str | Path | None = None,
 ) -> CompiledProtocol:
     """Compile and fail-closed-validate one friction protocol against *model*."""
+    _validate_protocol_identity(spec, expected_family=FRICTION_FAMILY)
     if not spec.cruise_speeds_rad_s:
         raise ValueError("at least one cruise speed is required")
     dt = spec.sample_period_s
@@ -196,13 +221,18 @@ def generate_friction_protocol(
     largest = float(np.max(np.abs(amplitudes)))
 
     pieces: list[tuple[str, str, NDArray, NDArray, NDArray, bool, str | None]] = []
+    plateau_by_segment: dict[str, tuple[int, int, tuple[float, ...]]] = {}
 
     def hold_piece(
         kind: str, position: NDArray[np.float64], duration: float, label: str
     ) -> None:
         steps = max(int(round(duration / dt)), 1)
-        eligible = kind == "hold"
-        reason = None if eligible else "startup or shutdown transient"
+        eligible = False
+        reason = (
+            "stationary hold is outside sliding-friction analysis"
+            if kind == "hold"
+            else "startup or shutdown transient"
+        )
         pieces.append(
             (
                 label,
@@ -233,6 +263,18 @@ def generate_friction_protocol(
         start = home + start_offset * amplitudes
         eligible = kind == "excitation"
         reason = None if eligible else "transit back to home"
+        if eligible:
+            cruise = (dprofile == cruise_speed) & (ddprofile == 0.0)
+            cruise_indices = np.flatnonzero(cruise)
+            if not len(cruise_indices) or not np.all(np.diff(cruise_indices) == 1):
+                raise RuntimeError(
+                    f"{label} did not compile to one constant-velocity plateau"
+                )
+            plateau_by_segment[label] = (
+                int(cruise_indices[0]),
+                int(cruise_indices[-1]) + 1,
+                tuple(float(value) for value in cruise_speed * per_joint),
+            )
         pieces.append(
             (
                 label,
@@ -268,6 +310,7 @@ def generate_friction_protocol(
     hold_piece("settle", home, spec.settle_s, "settle_end")
 
     segments: list[Segment] = []
+    analysis_windows: list[AnalysisWindow] = []
     q_parts, dq_parts, ddq_parts = [], [], []
     cursor = 0
     for label, kind, q, dq, ddq, eligible, reason in pieces:
@@ -284,6 +327,19 @@ def generate_friction_protocol(
                 exclusion_reason=reason,
             )
         )
+        plateau = plateau_by_segment.get(label)
+        if plateau is not None:
+            relative_start, relative_stop, velocity = plateau
+            analysis_windows.append(
+                AnalysisWindow(
+                    window_id=f"{label}_cruise",
+                    kind=FRICTION_CRUISE,
+                    parent_segment_id=label,
+                    start_index=cursor + relative_start,
+                    end_index_exclusive=cursor + relative_stop,
+                    nominal_velocity_rad_s=velocity,
+                )
+            )
         cursor += len(q)
 
     q_all = np.vstack(q_parts)
@@ -309,6 +365,7 @@ def generate_friction_protocol(
         dq_rad_s=dq_all.astype("<f8"),
         ddq_rad_s2=ddq_all.astype("<f8"),
         segments=tuple(segments),
+        analysis_windows=tuple(analysis_windows),
     )
 
 
@@ -454,7 +511,6 @@ def _manifest(
     compiled: CompiledProtocol,
     model: mujoco.MjModel,
     *,
-    revision: str,
     created_at: str,
     workspace_root: str | Path | None,
 ) -> dict[str, object]:
@@ -464,8 +520,8 @@ def _manifest(
     return {
         "format": PROTOCOL_FORMAT,
         "protocol_id": spec.protocol_id,
-        "revision": revision,
         "family": spec.family_id,
+        "role": spec.role,
         "created_at": created_at,
         "content_sha256": "",
         "description": (
@@ -521,6 +577,7 @@ def _manifest(
             }
             for segment in compiled.segments
         ],
+        "analysis_windows": [asdict(window) for window in compiled.analysis_windows],
         "start_state": {
             "q_rad": compiled.q_rad[0].tolist(),
             "dq_rad_s": compiled.dq_rad_s[0].tolist(),
@@ -551,14 +608,13 @@ def write_protocol_bundle(
     protocols_root: str | Path,
     *,
     model: mujoco.MjModel,
-    revision: str = "r1",
     workspace_root: str | Path | None = None,
     created_at: str | None = None,
 ) -> Path:
-    """Write an immutable protocol bundle; fail closed unless it validates."""
-    root = Path(protocols_root) / compiled.spec.protocol_id / revision
+    """Write one content-addressed bundle; fail closed unless it validates."""
+    root = Path(protocols_root) / compiled.spec.protocol_id
     if root.exists():
-        raise FileExistsError(f"protocol revision already exists (immutable): {root}")
+        raise FileExistsError(f"protocol bundle already exists (immutable): {root}")
     if created_at is None:
         created_at = (
             datetime.datetime.now(datetime.UTC)
@@ -570,7 +626,6 @@ def write_protocol_bundle(
     manifest = _manifest(
         compiled,
         model,
-        revision=revision,
         created_at=created_at,
         workspace_root=workspace_root,
     )
@@ -615,7 +670,8 @@ class InertialProtocolSpec:
 
     protocol_id: str
     seed: int
-    family_id: str = "fer-inertial"
+    family_id: str = INERTIAL_FAMILY
+    role: str = TRAIN_ROLE
     harmonics: int = 5
     #: Multiples 2..8 of the 0.05 Hz fundamental implied by
     #: ``periods / min(base_frequency_hz)`` = 20 s.
@@ -746,6 +802,7 @@ def generate_inertial_protocol(
     """
     from fer_mujoco_sysid.diagnostics import friction_regressor_report
 
+    _validate_protocol_identity(spec, expected_family=INERTIAL_FAMILY)
     if spec.candidates < 1:
         raise ValueError("candidates must be at least 1")
     rng = np.random.default_rng(spec.seed)
@@ -808,4 +865,13 @@ def generate_inertial_protocol(
         dq_rad_s=dq_all.astype("<f8"),
         ddq_rad_s2=ddq_all.astype("<f8"),
         segments=segments,
+        analysis_windows=(
+            AnalysisWindow(
+                window_id="fourier_excitation",
+                kind=INERTIAL_EXCITATION,
+                parent_segment_id="fourier",
+                start_index=settle,
+                end_index_exclusive=samples - settle,
+            ),
+        ),
     )

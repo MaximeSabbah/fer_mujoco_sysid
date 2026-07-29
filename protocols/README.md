@@ -1,126 +1,157 @@
 # Protocol review — what these motions are for
 
-Read this first, then watch the videos (`*.mp4`), then look at
-`../identification_demo/result.md` for what the identification actually
-achieves in simulation.
+These are the six canonical motions used to identify a MuJoCo model whose
+rollouts reproduce the robot. Review the protocol plots in `review/`, watch
+the motions through `scripts/run-protocol`, and use
+`./scripts/validate-simulation` for the complete videos, plots, reports, and
+identified models from both simulation backends.
 
-Regenerate everything with `./scripts/identification-demo`
-(videos are not committed; they are rebuilt on demand).
+Regenerate the committed bundles and review plots only when intentionally
+changing the protocol design:
 
-## The problem these motions exist to solve
-
-The real robot parks ~62 mm short of its pregrasp target and stays there,
-pushing constant torque against joints that do not move (run
-`sbmpc_runs/pregrasp_real_20260722T132356Z`). The planner's MuJoCo model has
-**no friction at all**, so it believes that push should be accelerating the
-arm. To fix the controller we must first measure the friction the real robot
-actually has, and put it in the model.
-
-## What friction looks like, and why several speeds
-
-Joint friction has two parts that behave differently:
-
-```
-friction torque = frictionloss * sign(velocity)  +  damping * velocity
-                  \_______________________/         \_______________/
-                   dry / Coulomb / breakaway         viscous
-                   constant, flips with direction    grows with speed
+```bash
+./scripts/generate-protocols
+./scripts/generate-protocols --check
 ```
 
-Measured at **one** speed, these two are indistinguishable: one number, two
-unknowns. Any pair `(frictionloss, damping)` that sums to the same torque
-fits equally well.
+`--check` regenerates in a temporary location and verifies that the committed
+content hashes are reproducible.
 
-So each protocol sweeps every joint back and forth at **three different
-constant speeds** (default 0.05, 0.15 and 0.4 rad/s), in **both
-directions**, with **stops in between**:
+## Why there are two families
 
-| Part of the motion | What it measures |
+Friction and rigid-body dynamics require different excitation. A clean
+constant-velocity sweep makes friction legible but does not independently
+excite the links. A dynamic multi-frequency motion separates inertial effects
+but does not provide the clean cruise plateaus needed to distinguish dry from
+viscous friction.
+
+The identification pipeline therefore keeps `fer-friction` and
+`fer-inertial` as separate scientific protocols. It does not pool them into
+one generic fit. After the initial stages it may alternate between the two
+family-specific solves, because an incorrect inertial model can otherwise be
+absorbed into friction, but each update still uses only its intended family.
+
+## Friction protocols
+
+The joint-friction model has two terms:
+
+```text
+friction torque = frictionloss * sign(velocity) + damping * velocity
+                  \___________________________/   \________________/
+                     dry / Coulomb friction          viscous friction
+```
+
+At only one speed, the constant dry-friction offset and the
+velocity-dependent slope cannot be separated. The training protocols
+therefore sweep in both directions at three constant speeds: 0.05, 0.15, and
+0.4 rad/s, with smooth transitions and stops between regimes.
+
+| Motion part | Identification purpose |
 | --- | --- |
-| constant-speed cruise (flat velocity plateau) | one point on the friction curve: inertia contributes nothing at constant speed, so measured torque = gravity + friction |
-| three different cruise speeds | the slope (viscous damping) vs the offset (dry friction) |
-| both directions | the sign flip of dry friction — and any asymmetry between directions |
-| the slowest cruise (0.05 rad/s) | the near-standstill regime that caused the 62 mm error |
-| holds at the stops | pure standstill: gravity only, plus whatever the joint holds against |
+| constant-speed cruise | one point on the friction curve after the modeled rigid-body terms and gravity convention are accounted for |
+| several speeds | separates viscous slope from dry-friction offset |
+| both directions | exposes the dry-friction sign change and directional asymmetry |
+| slowest cruise | excites near-standstill behavior |
+| holds | standstill diagnostic, retained in the recording but excluded from the sliding-friction fit |
 
-That is the entire reason for the "regimes": each one is a sample point on
-the friction curve, and together they pin down its shape. The velocity
-profile is a **jerk-limited trapezoid (S-curve)** — smooth ramps into a flat
-cruise — chosen precisely so those flat plateaus exist and stay clean.
+The velocity profile is a jerk-limited trapezoid, or S-curve. Its flat cruise
+sections are deliberate: only explicitly marked, zero-acceleration cruise
+windows enter the classical friction solve. Approach, ramps, reversals,
+holds, returns, and filter edges remain in the recording and media but do not
+contaminate that solve.
 
-## The second family, and why one family cannot do both
+## Inertial protocols
 
-The friction motions move every joint on **one shared schedule**, which is
-what makes the cruise plateaus readable. That same property makes them
-useless for inertia: the joint velocities come out perfectly correlated
-(measured: 1.0000), so the data cannot tell which link's mass produced which
-torque. Inertia needs the joints moving **independently** and accelerating
-hard — the opposite of a clean cruise.
+The friction motions put every joint on a shared schedule. That makes their
+plateaus readable, but it does not provide enough independent acceleration to
+separate armature from link mass, centre-of-mass, and inertia effects.
 
-So there is a second family: a **Fourier series per joint, each at its own
-base frequency**, amplitude-scaled until whichever of position, velocity or
-acceleration binds first, and selected out of 24 random candidates by
-regressor conditioning. That drops the inter-joint velocity correlation to
-0.07 mean / 0.28 max and raises the acceleration from 13 % of the limit to
-16 rad/s².
+The inertial family instead uses a Fourier series per joint with distinct base
+frequencies. Candidate motions are scaled against the FER position, velocity,
+acceleration, jerk, torque, and scene-clearance constraints, then selected for
+useful conditioning. The identification stage releases only parameter
+directions that the recorded motion makes sensitive, conditioned, and
+sufficiently independent. Unsupported coordinates stay at the CAD prior.
 
-## The six protocols
+## The six canonical protocols
 
-| Protocol | Family | Purpose | Duration |
-| --- | --- | --- | --- |
-| `fer-friction-a` | friction | fitting data | ~42 s |
-| `fer-friction-b` | friction | fitting data (different seed → different per-joint amplitudes) | ~42 s |
-| `fer-friction-holdout` | friction | **never used for fitting** — different amplitudes and speeds, used only to judge the result | ~32 s |
-| `fer-inertial-a` | inertial | fitting data for armature and link inertias | ~21 s |
-| `fer-inertial-b` | inertial | fitting data (different seed) | ~21 s |
-| `fer-inertial-holdout` | inertial | **never used for fitting** — different frequency mix | ~21 s |
+| Protocol ID | Family | Role | Approximate duration |
+| --- | --- | --- | ---: |
+| `fer-friction-a` | friction | training | 42 s |
+| `fer-friction-b` | friction | training, different seeded amplitudes | 42 s |
+| `fer-friction-holdout` | friction | validation only | 32 s |
+| `fer-inertial-a` | inertial | training | 21 s |
+| `fer-inertial-b` | inertial | training, different seed | 21 s |
+| `fer-inertial-holdout` | inertial | validation only | 21 s |
 
-In the friction family all joints move together on a shared schedule; each
-joint has its own amplitude (~0.3 rad around the home pose) with a small
-seeded variation, so the joints do not all trace identical paths.
+The holdouts are never used to fit parameters. They test whether the
+identified simulator reproduces measured joint position, joint velocity,
+end-effector motion, and torque behavior on motions it did not optimize
+against.
 
-Every protocol is checked before it is written: FER position, velocity,
-acceleration, jerk and torque limits with a 20 % margin; clearance against
-the table the robot is bolted to; and consistency between the position,
-velocity and acceleration arrays. Each is byte-reproducible from its seed,
-and every one of them starts and ends at rest at the home pose.
+Each protocol starts and ends at rest at the reviewed home pose. The bundles
+live directly under `protocols/<protocol-id>/`; there are no parallel
+revision directories. Each bundle declares its `family`, `role`, limits,
+segments, immutable `analysis_windows`, source model, payload, and
+`content_sha256`. Git history and that content hash identify revisions.
 
-That last property is not decoration. In revision r1 the inertial protocols
-did **not** have it — their per-joint frequencies did not divide the protocol
-duration, so each joint stopped mid-cycle and the trajectory ended with a
-step back to the home pose, up to 0.59 rad in a single 10 ms sample. Played
-through the trajectory controller in ROS simulation, that saturated four
-joints and aborted the run. r2 fixes it and the consistency check now
-catches the whole class.
+Before a bundle is written, generation checks:
 
-## What to check in the videos
+- FER position, velocity, acceleration, jerk, and torque limits with the
+  configured safety margin;
+- clearance against the modeled table and scene;
+- consistency between position, velocity, and acceleration arrays;
+- rest and continuity at the start and end; and
+- commensurate inertial frequencies, so the trajectory returns continuously
+  to its terminal pose.
 
-- Does the motion look safe and sane in your cell (the arm stays near the
-  home pose and returns to it)?
-- Are the amplitudes big enough to be useful, small enough to be safe?
-- Are the slow sweeps slow enough for the regime you care about?
-- The inertial motions are much livelier than the friction ones — peak
-  2.0 rad/s and 16 rad/s². Is that acceptable in your cell?
-- Are ~42 s (friction) and ~21 s (inertial) acceptable run lengths?
+## The 100 Hz analysis contract
 
-Changing any of this is still cheap: edit the specs in
-`src/fer_mujoco_sysid/campaign.py`, bump `CAMPAIGN_REVISION`, and regenerate.
+Canonical protocol knots are on a 100 Hz grid. Analysis keeps an additional
+0.1 s guard—ten samples—inside each declared window so filtering and timing
+uncertainty cannot leak a ramp, reversal, or settle segment into an eligible
+interval.
 
-## Status: what has actually been achieved so far
+The Franka robot-state broadcaster also remains at its proven **100 Hz**
+collection rate. Higher publication rates caused incomplete data collection.
+Native samples and timestamps are preserved; lower-rate torque telemetry is
+causally held when aligned to another clock, with sample age and new-sample
+masks retained. The pipeline does not manufacture extra measurements through
+linear interpolation.
 
-Everything below is **simulation only**; the robot has not moved.
+These masks affect analysis only. Raw bags, complete normalized recordings,
+plots, videos, holds, ramps, returns, and settle samples remain intact.
 
-| Stage | State |
-| --- | --- |
-| Fitting engine (friction, armature, inertia; staged fits, conditioning and uncertainty reporting) | done, proven on synthetic data with known hidden values |
-| Excitation protocols (these motions) | done, committed, limit-checked — revision r2 |
-| Identification demonstrated end-to-end in simulation | see `../identification_demo/result.md` |
-| Playback in ROS simulation | done — all six protocols play to completion through the trajectory controller |
-| Recording the run into a dataset | not started |
-| Playback on the real robot | not started |
-| New model delivered to hydrax / sbmpc_ros | not started |
+## What to review
 
-The demonstration run answers the question that matters before touching
-hardware: *if the robot really had friction of this magnitude, would this
-machinery find it, and would the identified model predict the robot's motion
-better than the current frictionless one?*
+For every protocol:
+
+- Does the whole motion fit safely in the real cell?
+- Does the arm remain near the intended home region and return to rest?
+- Are the amplitudes large enough to excite the model without approaching
+  joint, torque, or workspace limits?
+- Are the slow friction cruises representative of the near-standstill regime
+  relevant to the controller?
+- Are the livelier inertial motions and their run lengths acceptable on the
+  real robot?
+- Does the tracking plot show that the simulated plant actually followed the
+  requested excitation?
+
+Inspect one motion through the critical ROS simulation route with:
+
+```bash
+./scripts/run-protocol fer-friction-a --watch
+```
+
+The complete evidence is generated by:
+
+```bash
+./scripts/validate-simulation
+```
+
+That command must run all six protocols through both direct `mujoco` and
+`mujoco_ros`, using one shared immutable simulation truth. Its generated
+status and reports—not this document—state whether the current code and
+protocols pass the simulation gate. Do not transfer the campaign to the real
+robot until a fresh all-backend run is accepted and its videos, plots,
+identified model, and `mujoco_ros` acquisition evidence have been reviewed.

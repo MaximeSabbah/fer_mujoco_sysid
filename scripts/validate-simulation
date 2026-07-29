@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run the complete, immutable simulation release gate. With no arguments this
+# records and identifies all six protocols in both MuJoCo backends, renders the
+# requested evidence, and advertises a ROS-path model only if every gate passes.
+#
+#   ./scripts/validate-simulation
+#   ./scripts/validate-simulation --output /workspace/runs/fer-sysid-001
+#   ./scripts/validate-simulation --backend mujoco --no-media
+
+export PYTHONUNBUFFERED=1
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+export MPLCONFIGDIR="${FER_SYSID_MPLCONFIGDIR:-/tmp/fer_mujoco_sysid_mpl}"
+export UV_CACHE_DIR="${FER_SYSID_UV_CACHE_DIR:-/tmp/fer_mujoco_sysid_uv_cache}"
+export ROS_LOG_DIR="${FER_SYSID_ROS_LOG_DIR:-/tmp/fer_mujoco_sysid_ros_logs}"
+export MUJOCO_GL="${MUJOCO_GL:-egl}"
+
+mkdir -p "${MPLCONFIGDIR}" "${UV_CACHE_DIR}" "${ROS_LOG_DIR}"
+
+exec uv run --locked python -m fer_mujoco_sysid.simulation_pipeline "$@"

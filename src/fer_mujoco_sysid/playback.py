@@ -46,6 +46,11 @@ APPROACH_PERIOD_S = 0.01
 #: this; it is a verification threshold, not a motion tolerance.
 START_TOLERANCE_RAD = 0.02
 
+# A protocol starts from declared zero velocity.  This gate matters especially
+# on hardware now that an arm already at the start pose does not receive a
+# settling approach trajectory.
+START_VELOCITY_TOLERANCE_RAD_S = 0.02
+
 
 class PlaybackError(RuntimeError):
     """A protocol cannot be played as requested, or the robot is not ready."""
@@ -171,6 +176,29 @@ def protocol_playback(
     )
 
 
+def approach_required(
+    *,
+    real_robot: bool,
+    at_protocol_start: bool,
+    allow_real_approach: bool,
+) -> bool:
+    """Decide whether to send a move-to-start trajectory.
+
+    Simulation deliberately exercises the approach on every run.  Hardware
+    defaults to no approach: it must already be at the reviewed start pose.
+    Moving a real arm from an arbitrary pose is permitted only by an explicit
+    operator opt-in.
+    """
+    if real_robot and not at_protocol_start and not allow_real_approach:
+        raise PlaybackError(
+            "the real arm is not already at the reviewed protocol start. "
+            "Automatic approach is disabled on hardware; position the arm at "
+            "the start or explicitly opt in with --allow-real-approach while "
+            "watching the arm."
+        )
+    return not real_robot or not at_protocol_start
+
+
 def approach_playback(
     current_q_rad: NDArray[np.float64],
     target_q_rad: NDArray[np.float64],
@@ -287,6 +315,59 @@ def check_start_state(
         joint_names=names,
         error_rad=measured - expected,
         tolerance_rad=tolerance_rad,
+    )
+
+
+@dataclass(frozen=True)
+class StartVelocityCheck:
+    """How far measured joint velocity is from the protocol start velocity."""
+
+    joint_names: tuple[str, ...]
+    error_rad_s: NDArray[np.float64]
+    tolerance_rad_s: float
+
+    @property
+    def worst_joint(self) -> int:
+        return int(np.argmax(np.abs(self.error_rad_s)))
+
+    @property
+    def worst_error_rad_s(self) -> float:
+        return float(np.abs(self.error_rad_s[self.worst_joint]))
+
+    @property
+    def satisfied(self) -> bool:
+        return self.worst_error_rad_s <= self.tolerance_rad_s
+
+    def describe(self) -> str:
+        return (
+            f"worst start velocity {self.worst_error_rad_s:.4f} rad/s on "
+            f"{self.joint_names[self.worst_joint]} "
+            f"(tolerance {self.tolerance_rad_s:.4f} rad/s)"
+        )
+
+
+def check_start_velocity(
+    measured_dq_rad_s: NDArray[np.float64],
+    manifest: Mapping[str, object],
+    *,
+    tolerance_rad_s: float = START_VELOCITY_TOLERANCE_RAD_S,
+) -> StartVelocityCheck:
+    """Compare measured velocity with the protocol's declared start velocity."""
+    names = joint_order(manifest)
+    start = manifest.get("start_state")
+    if not isinstance(start, Mapping) or "dq_rad_s" not in start:
+        raise PlaybackError("manifest has no 'start_state.dq_rad_s'")
+    expected = np.asarray(start["dq_rad_s"], dtype=np.float64)
+    measured = np.asarray(measured_dq_rad_s, dtype=np.float64)
+    if measured.shape != expected.shape:
+        raise PlaybackError(
+            f"measured velocity has {measured.shape} values, "
+            f"protocol start velocity has {expected.shape}"
+        )
+    return StartVelocityCheck(
+        joint_names=names,
+        error_rad_s=measured - expected,
+        tolerance_rad_s=tolerance_rad_s,
     )
 
 

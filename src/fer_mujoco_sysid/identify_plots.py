@@ -121,7 +121,8 @@ def plot_rollout_vs_measurement(
                     )
             _style(
                 axis,
-                f"joint {joint + 1}, window from {start * reference.opt.timestep:.0f} s",
+                f"joint {joint + 1}, window from "
+                f"{start * reference.opt.timestep:.0f} s",
                 "time in window [s]",
                 "q [rad]",
             )
@@ -143,7 +144,7 @@ def plot_error_vs_horizon(path: Path, horizons: dict) -> Path:
     labels = list(horizons)
     values = [float(label.rstrip("s")) for label in labels]
 
-    figure, axes = plt.subplots(1, 2, figsize=(10, 3.6), constrained_layout=True)
+    figure, axes = plt.subplots(1, 3, figsize=(14, 3.6), constrained_layout=True)
     for name, colour in (
         ("nominal", _NOMINAL),
         ("classical", _CLASSICAL),
@@ -163,7 +164,18 @@ def plot_error_vs_horizon(path: Path, horizons: dict) -> Path:
             color=colour,
             label=name,
         )
-    for axis, ylabel in ((axes[0], "gripper RMSE [mm]"), (axes[1], "worst q RMSE [rad]")):
+        axes[2].plot(
+            values,
+            [horizons[label][name]["worst_dq_rmse_rad_s"] for label in labels],
+            marker="o",
+            color=colour,
+            label=name,
+        )
+    for axis, ylabel in (
+        (axes[0], "gripper RMSE [mm]"),
+        (axes[1], "worst q RMSE [rad]"),
+        (axes[2], "worst dq RMSE [rad/s]"),
+    ):
         axis.set_yscale("log")
         _style(axis, "held-out prediction error", "rollout horizon [s]", ylabel)
     axes[0].legend(fontsize=7)
@@ -214,7 +226,12 @@ def plot_friction_curves(
         )
         speed = speed[np.abs(speed) > SLIDING_THRESHOLD_RAD_S]
         for values, colour, name, style in (
-            ((linear.frictionloss[joint], linear.damping[joint]), _CLASSICAL, "classical", "-"),
+            (
+                (linear.frictionloss[joint], linear.damping[joint]),
+                _CLASSICAL,
+                "classical",
+                "-",
+            ),
             ((refined_fl[joint], refined_d[joint]), _REFINED, "refined", "--"),
         ):
             axis.plot(
@@ -245,10 +262,12 @@ def plot_torque_tracking(
     models: dict[str, mujoco.MjModel],
     run,
     ddq_rad_s2: NDArray[np.float64],
+    recorded_torque_Nm: NDArray[np.float64],
     *,
+    torque_label: str,
     seconds: float = 12.0,
 ) -> Path:
-    """Recorded commanded torque against what each model reconstructs.
+    """The exact evaluated torque channel against model reconstruction.
 
     **Read the spikes at the corners as an artifact, not a defect.** This is
     inverse dynamics, ``tau = M(q) ddq + C + friction``, and its ``ddq`` comes
@@ -269,17 +288,29 @@ def plot_torque_tracking(
     stop = min(int(seconds / reference.opt.timestep), len(run.control))
     time = np.arange(stop) * reference.opt.timestep
     q, dq = run.measured[:stop, :7], run.measured[:stop, 7:14]
+    recorded = np.asarray(recorded_torque_Nm, dtype=np.float64)
+    if recorded.shape != run.control.shape:
+        raise ValueError(
+            f"recorded torque shape {recorded.shape} does not match "
+            f"run control shape {run.control.shape}"
+        )
 
     reconstructions = {
         name: predicted_torque(model, q, dq, ddq_rad_s2[:stop])
         for name, model in models.items()
     }
 
-    figure, axes = plt.subplots(7, 1, figsize=(11, 12), sharex=True, constrained_layout=True)
+    figure, axes = plt.subplots(
+        7, 1, figsize=(11, 12), sharex=True, constrained_layout=True
+    )
     for joint in range(7):
         axis = axes[joint]
         axis.plot(
-            time, run.control[:stop, joint], color=_MEASURED, linewidth=1.4, label="recorded"
+            time,
+            recorded[:stop, joint],
+            color=_MEASURED,
+            linewidth=1.4,
+            label=f"recorded {torque_label}",
         )
         for name, colour in (
             ("nominal", _NOMINAL),
@@ -302,7 +333,9 @@ def plot_torque_tracking(
             axis.legend(fontsize=7, ncol=4)
     axes[-1].set_xlabel("time [s]", fontsize=8, color=_INK)
     figure.suptitle(
-        "Commanded joint torque: recorded against model reconstruction", color=_INK
+        f"Evaluated joint torque ({torque_label}): recorded against model "
+        "reconstruction",
+        color=_INK,
     )
     figure.savefig(path, dpi=140)
     plt.close(figure)
@@ -429,11 +462,18 @@ def plot_tracking(
 
     worst = int(np.argmax(np.abs(error).max(axis=0)))
     axes[1].plot(
-        time, q_desired_rad[:stop, worst], color=_CLASSICAL, linewidth=1.4,
+        time,
+        q_desired_rad[:stop, worst],
+        color=_CLASSICAL,
+        linewidth=1.4,
         label="commanded",
     )
     axes[1].plot(
-        time, q_rad[:stop, worst], color=_MEASURED, linewidth=1.0, linestyle="--",
+        time,
+        q_rad[:stop, worst],
+        color=_MEASURED,
+        linewidth=1.0,
+        linestyle="--",
         label="measured",
     )
     _style(
@@ -475,7 +515,9 @@ def plot_end_effector(
     steps = int(round(horizon_s / reference.opt.timestep))
     starts = np.linspace(0, max(len(run.control) - steps - 1, 0), windows, dtype=int)
 
-    def positions(model: mujoco.MjModel, rows: NDArray[np.float64]) -> NDArray[np.float64]:
+    def positions(
+        model: mujoco.MjModel, rows: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
         data = mujoco.MjData(model)
         out = np.empty((len(rows), 3))
         for index, value in enumerate(rows):
@@ -516,18 +558,35 @@ def plot_end_effector(
             )
             predicted = positions(model, np.squeeze(sensor, axis=0)[:, :7])
             error = 1e3 * np.linalg.norm(predicted - measured, axis=1)
-            axes[row, 0].plot(time, predicted[:, 0], color=colour, linewidth=1.1,
-                              linestyle="--" if name == "identified" else "-", label=name)
-            axes[row, 1].semilogy(time, np.maximum(error, 1e-4), color=colour,
-                                  linewidth=1.2, label=name)
+            axes[row, 0].plot(
+                time,
+                predicted[:, 0],
+                color=colour,
+                linewidth=1.1,
+                linestyle="--" if name == "identified" else "-",
+                label=name,
+            )
+            axes[row, 1].semilogy(
+                time, np.maximum(error, 1e-4), color=colour, linewidth=1.2, label=name
+            )
 
-        axes[row, 0].plot(time, measured[:, 0], color=_MEASURED, linewidth=2.0,
-                          label="measured", zorder=0)
-        _style(axes[row, 0],
-               f"gripper x, window from {start * reference.opt.timestep:.0f} s",
-               "time in window [s]", "x [m]")
-        _style(axes[row, 1], "gripper position error", "time in window [s]",
-               "error [mm]")
+        axes[row, 0].plot(
+            time,
+            measured[:, 0],
+            color=_MEASURED,
+            linewidth=2.0,
+            label="measured",
+            zorder=0,
+        )
+        _style(
+            axes[row, 0],
+            f"gripper x, window from {start * reference.opt.timestep:.0f} s",
+            "time in window [s]",
+            "x [m]",
+        )
+        _style(
+            axes[row, 1], "gripper position error", "time in window [s]", "error [mm]"
+        )
         if row == 0:
             axes[row, 0].legend(fontsize=7)
 

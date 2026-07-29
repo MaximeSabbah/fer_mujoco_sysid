@@ -1,16 +1,14 @@
 """The reviewable friction-identification campaign (P3 slice 2).
 
-Defines the canonical friction protocols plus a held-out variant as fixed,
-seeded specs; generates their immutable bundles under ``protocols/`` and the
-human-review material under ``protocols/review/`` (per-joint motion
-plots and a conditioning summary). ``--check`` regenerates every spec into a
-temporary directory and compares content hashes against the committed
-bundles, so generator drift cannot go unnoticed.
+Defines the canonical friction and inertial protocols plus held-out variants
+as fixed, seeded specs; generates their content-addressed bundles under
+``protocols/`` and the human-review material under ``protocols/review/``
+(per-joint motion plots and a conditioning summary). ``--check`` regenerates
+every spec into a temporary directory and compares content hashes against the
+committed bundles, so generator drift cannot go unnoticed.
 
-Fit/held-out roles are NOT recorded here — they belong to dataset splits
-(P1 contract). The held-out protocol simply uses a separate seed, different
-amplitudes, and different cruise speeds so later validation data comes from
-a genuinely different configuration.
+Family and train/holdout role are explicit protocol metadata. Identification
+must consume those fields rather than infer semantics from protocol names.
 """
 
 from __future__ import annotations
@@ -48,17 +46,16 @@ from fer_mujoco_sysid.model import (  # noqa: E402
     build_hydrax_arm_spec,
     resolve_model_paths,
 )
+from fer_mujoco_sysid.protocol import HOLDOUT_ROLE, TRAIN_ROLE  # noqa: E402
 
 # Committed campaign timestamp: fixed so regeneration is byte-reproducible.
 CAMPAIGN_CREATED_AT = "2026-07-27T00:00:00Z"
-# r2 (2026-07-28): the r1 inertial protocols ended their Fourier segment
-# mid-cycle and stepped back to the home pose in a single 10 ms sample — up to
-# 0.59 rad. Played through the trajectory controller in ROS simulation that
-# saturated four joints and aborted the goal on a path-tolerance violation.
-# The frequencies are now commensurate with the protocol duration and the
-# series lands exactly on home; see InertialProtocolSpec. r1 was never
-# approved and is not kept.
-CAMPAIGN_REVISION = "r2"
+# Family/role and fit-eligible subwindows are immutable manifest metadata.
+# Friction windows are only the exact constant-velocity cruise plateaus;
+# inertial windows are only the Fourier excitation. The complete trajectories
+# and all settle/hold/return samples remain recorded. Inertial frequencies are
+# commensurate with the protocol duration, so every trajectory returns to rest
+# at home without a terminal step; see InertialProtocolSpec.
 
 # The campaign: two canonical protocols (different seeds, so different
 # per-joint amplitude jitter) and one held-out variant with a different
@@ -71,11 +68,22 @@ ProtocolSpec = FrictionProtocolSpec | InertialProtocolSpec
 # Coulomb offset from the viscous slope. All joints share one schedule,
 # which is fine here (each joint's friction acts only on its own torque).
 FRICTION_CAMPAIGN: tuple[FrictionProtocolSpec, ...] = (
-    FrictionProtocolSpec(protocol_id="fer-friction-a", seed=101, sample_period_s=0.01),
-    FrictionProtocolSpec(protocol_id="fer-friction-b", seed=102, sample_period_s=0.01),
+    FrictionProtocolSpec(
+        protocol_id="fer-friction-a",
+        seed=101,
+        role=TRAIN_ROLE,
+        sample_period_s=0.01,
+    ),
+    FrictionProtocolSpec(
+        protocol_id="fer-friction-b",
+        seed=102,
+        role=TRAIN_ROLE,
+        sample_period_s=0.01,
+    ),
     FrictionProtocolSpec(
         protocol_id="fer-friction-holdout",
         seed=901,
+        role=HOLDOUT_ROLE,
         sample_period_s=0.01,
         amplitudes_rad=(0.27,) * 7,
         cruise_speeds_rad_s=(0.07, 0.2, 0.35),
@@ -87,11 +95,12 @@ FRICTION_CAMPAIGN: tuple[FrictionProtocolSpec, ...] = (
 # properties are required to identify link inertias and armature, and
 # neither holds in the friction family.
 INERTIAL_CAMPAIGN: tuple[InertialProtocolSpec, ...] = (
-    InertialProtocolSpec(protocol_id="fer-inertial-a", seed=201),
-    InertialProtocolSpec(protocol_id="fer-inertial-b", seed=202),
+    InertialProtocolSpec(protocol_id="fer-inertial-a", seed=201, role=TRAIN_ROLE),
+    InertialProtocolSpec(protocol_id="fer-inertial-b", seed=202, role=TRAIN_ROLE),
     InertialProtocolSpec(
         protocol_id="fer-inertial-holdout",
         seed=902,
+        role=HOLDOUT_ROLE,
         # Different multiples of the same fundamental as the canonical
         # protocols, so the holdout excites a different frequency mix while
         # still returning to rest at home (see InertialProtocolSpec).
@@ -265,7 +274,6 @@ def generate_campaign(
             compiled,
             protocols_root,
             model=model,
-            revision=CAMPAIGN_REVISION,
             workspace_root=workspace_root,
             created_at=CAMPAIGN_CREATED_AT,
         )
@@ -300,8 +308,9 @@ def _write_summary(path: Path, rows: list[dict[str, object]]) -> None:
     lines = [
         "# Campaign review summary",
         "",
-        f"Generated deterministically ({CAMPAIGN_CREATED_AT}, revision "
-        f"{CAMPAIGN_REVISION}). Conditioning numbers come from simulated "
+        f"Generated deterministically ({CAMPAIGN_CREATED_AT}). "
+        "Each protocol is identified by its content SHA-256. Conditioning "
+        "numbers come from simulated "
         "position-tracked playback on the nominal model: the 14-parameter "
         "friction block (frictionloss + damping, all joints) must be "
         f"identifiable (ratio >= {CONDITIONING_RATIO_MINIMUM:.0e}) with every "
@@ -337,7 +346,7 @@ def verify_campaign(
     ).compile()
     problems: list[str] = []
     for spec in CAMPAIGN:
-        committed_root = protocols_root / spec.protocol_id / CAMPAIGN_REVISION
+        committed_root = protocols_root / spec.protocol_id
         if not committed_root.is_dir():
             problems.append(f"{spec.protocol_id}: missing {committed_root}")
             continue
@@ -348,7 +357,6 @@ def verify_campaign(
                 compiled,
                 Path(scratch),
                 model=model,
-                revision=CAMPAIGN_REVISION,
                 workspace_root=workspace_root,
                 created_at=CAMPAIGN_CREATED_AT,
             )

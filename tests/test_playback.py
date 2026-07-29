@@ -39,8 +39,7 @@ _JOINTS = tuple(f"fer_joint{index}" for index in range(1, 8))
 
 def _bundle(protocol_id: str = "fer-friction-a"):
     root = repository_root() / "protocols" / protocol_id
-    revision = sorted(path for path in root.iterdir() if path.is_dir())[-1]
-    return load_protocol_bundle(revision)
+    return load_protocol_bundle(root)
 
 
 # -- time scaling -----------------------------------------------------------
@@ -247,8 +246,10 @@ def test_the_robot_side_import_surface_needs_no_mujoco() -> None:
     """
     source = (
         "import sys;"
-        "import fer_mujoco_sysid.protocol, fer_mujoco_sysid.playback, fer_mujoco_sysid.io;"
-        "heavy = sorted(m for m in ('mujoco', 'scipy', 'matplotlib') if m in sys.modules);"
+        "import fer_mujoco_sysid.protocol, fer_mujoco_sysid.playback,"
+        "fer_mujoco_sysid.io;"
+        "heavy = sorted(m for m in ('mujoco', 'scipy', 'matplotlib') "
+        "if m in sys.modules);"
         "print(','.join(heavy))"
     )
     result = subprocess.run(

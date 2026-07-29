@@ -32,19 +32,33 @@ DEFAULT_CUTOFF_HZ = 8.0
 class FilterSettings:
     """A zero-phase Butterworth low-pass, recorded with its results.
 
+    ``enabled=False`` is reserved for the deterministic simulation-oracle
+    gate.  It proves that acquisition, fitting, and export close on exact
+    engine data without preprocessing changing the system being identified.
+    Hardware and robustness runs keep filtering enabled.
+
     ``order`` is the per-pass order; ``filtfilt`` applies it twice, so the
     effective magnitude response is that of a 2*order filter (its -3 dB point
     is below ``cutoff_hz``; the nominal cutoff is reported as configured,
     which is the convention in the identification literature).
     """
 
+    enabled: bool = True
     order: int = DEFAULT_ORDER
     cutoff_hz: float = DEFAULT_CUTOFF_HZ
     zero_phase: bool = True
 
     def describe(self, sample_rate_hz: float) -> dict[str, object]:
+        if not self.enabled:
+            return {
+                "kind": "none",
+                "enabled": False,
+                "sample_rate_hz": float(sample_rate_hz),
+                "reason": "deterministic simulation numerical-closure gate",
+            }
         return {
             "kind": "butterworth_lowpass",
+            "enabled": True,
             "order": self.order,
             "cutoff_hz": self.cutoff_hz,
             "zero_phase": self.zero_phase,
@@ -71,6 +85,8 @@ def lowpass(
 ) -> NDArray[np.float64]:
     """Zero-phase Butterworth low-pass along axis 0 (one column per joint)."""
     settings = settings or FilterSettings()
+    if not settings.enabled:
+        return np.asarray(values, dtype=np.float64).copy()
     nyquist = 0.5 * sample_rate
     if not 0.0 < settings.cutoff_hz < nyquist:
         raise ValueError(

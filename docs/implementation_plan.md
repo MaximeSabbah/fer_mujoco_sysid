@@ -215,7 +215,7 @@ compared against the 62 mm baseline.
 | D027 | 2026-07-28 | Hardware playback targets `joint_trajectory_controller/JointTrajectoryController`, already registered in the Agimus stack. It runs **effort-mode with an internal PID**, so the torque driving each joint is the JTC's commanded effort — a known quantity, which is what the fit consumes. Supersedes D021's "measured `tau_J` as the fit torque input". Open: the FR3 compensates gravity internally, so commanded effort excludes gravity; harmless for friction, must be handled explicitly before inertial identification. |
 | D028 | 2026-07-28 | The *reason* effort mode is required, settled in slice A: friction is precisely the term that changes with actuation mode, and the deployment stack drives this robot in effort mode (`linear_feedback_controller`). Whatever the robot does internally under a torque command must be identical during identification and during deployment, or the friction identified here is not the friction the planner meets. Identifying under the robot's internal position controller and deploying under torque control would measure the wrong thing. Effort mode is therefore a requirement, not a convenience. |
 | D029 | 2026-07-28 | **The ROS-simulation plant runs gravity-free.** Under a torque command the FER compensates its own weight, so the effort a controller sends is the effort *on top of* gravity compensation; `sbmpc_ros` encodes the same fact from the other side (`remove_gravity_compensation_effort`: true on the robot, false in simulation). Measured, not assumed: a gravity-enabled simulated plant left 36.9 mrad of standing error on joint 4 under these gains and failed the player's start-state check for a reason hardware does not have. Consequence for P7, now explicit rather than open: commanded effort cannot identify link masses, because the gravity torque that reveals them is not in it. Mass and COM must come from the measured link-side `tau_J` channel instead. |
-| D030 | 2026-07-28 | **Campaign revision r2.** The r1 inertial protocols were not executable: per-joint base frequencies were incommensurate with the protocol duration, so each joint stopped mid-cycle and the trailing settle segment stepped back to the home pose within a single 10 ms sample — up to 0.59 rad. Through the trajectory controller that saturated four joints and aborted the goal on a path-tolerance violation, at full speed and again at half speed. Base frequencies are now integer multiples of the `1/duration` fundamental and the series is sampled through its endpoint, so it lands on home exactly; the trajectory-consistency check that catches this class of defect is enabled for the inertial family, where it had been disabled. Found by the slice A rehearsal in ROS simulation, never on hardware. r1 was never approved and is not kept. |
+| D030 | 2026-07-28 | An early inertial candidate was rejected because its per-joint base frequencies were incommensurate with the protocol duration: each joint stopped mid-cycle and the trailing settle segment stepped back to home within one 10 ms sample—up to 0.59 rad. Through the trajectory controller that saturated four joints and aborted the ROS-simulation run. Canonical frequencies are integer multiples of the `1/duration` fundamental and the series is sampled through its endpoint, so it lands exactly at rest; the inertial trajectory-consistency gate now catches this entire defect class. The invalid candidate never ran on hardware and is not retained. |
 | D031 | 2026-07-28 | **Nothing that runs inside a ROS process imports MuJoCo.** A ROS environment carries whatever `mujoco` its own packages put on the path — in this workspace a `build/` data directory shadows the real package as an attribute-less namespace package. The bundle *reader* is therefore split into `protocol.py` (NumPy only) from the bundle *writer* in `excitation.py` (needs the model), the package `__init__` imports nothing, and the simulation scene is generated ahead of the launch in the project's own environment. Gated by a test that imports the robot-side modules in a subprocess and asserts MuJoCo and SciPy stayed out of `sys.modules`. |
 | D032 | 2026-07-28 | **No consumer repository is required to use this one** (user requirement). The ROS-simulation plant is built from the hydrax nominal model — the model this project identifies — renamed to the ROS joint convention, rather than borrowed from `sbmpc_ros`. `ModelPaths.require()` now demands only the nominal model; the deployment-target MJCF became optional (`has_ros_overlay`), and the checks that compare against it skip when it is absent. Gated by a test that points the deployment-target path at nothing and asserts the contract, the nominal model and the simulation plant all still work. Side benefit: the simulated plant is now literally the model being identified, so it cannot drift from it. |
 | D033 | 2026-07-28 | **An identified model is exported through a whitelist, or not at all** (`export.py`). Joint friction, damping and armature are identification outputs; masses, inertias, link poses, joint ranges, actuator limits and geometry are compared against the nominal model and must be identical — a change there is a different robot, not a better estimate of this one. The exported file is reloaded and must reproduce the in-memory model's held-out prediction, and a manifest pins both files by SHA-256 so a candidate model traces back to the fit that produced it. `export_identified_model` returns the verification, so a caller cannot obtain a model without its evidence. Gated including the negative case: a tampered link mass is rejected. |
@@ -281,8 +281,8 @@ inverse-dynamics predicted-torque check. Bundles follow the frozen P1
 motion-protocol contract (`command_interface: joint_trajectory` per D021,
 provenance-verified source-model hash from `contracts/nominal_sources.toml`,
 checksums) and must pass `validate_motion_protocol` +
-`verify_checksum_manifest` before the writer returns; revisions are
-immutable. Gates in `tests/test_excitation.py`: determinism (identical
+`verify_checksum_manifest` before the writer returns; bundles are immutable
+and content-addressed. Gates in `tests/test_excitation.py`: determinism (identical
 `content_sha256` for identical spec), cruise-plateau presence, limit
 rejection, bundle round-trip, and (slow) a `conditioning_report` check
 that simulated playback identifies the full 14-parameter friction block
@@ -297,7 +297,7 @@ P3 slice 2 (implemented — **campaign awaiting user review**):
 protocols, `fer-friction-holdout` (seed 901, different amplitudes and
 cruise speeds) reserved for held-out validation (roles themselves are
 assigned later in dataset splits, per the P1 contract). Bundles live under
-`protocols/<id>/<revision>/` (100 Hz knot grid, compressed, ~250 KB each,
+`protocols/<id>/` (100 Hz knot grid, compressed, ~250 KB each,
 byte-reproducible via the fixed campaign timestamp);
 `./scripts/generate-protocols --check` regenerates everything and compares
 content hashes, and a fast test runs the same drift guard. Review material
@@ -308,7 +308,7 @@ frictionloss/damping correlation 0.73/0.73/0.83 — all clean).
 
 **Review checkpoint (open): the user reviews the motion in
 `protocols/review/` before these motions are treated as the approved
-campaign.** Changes are cheap now (edit the specs, regenerate as r2);
+campaign.** Changes are cheap now (edit the specs and regenerate);
 after P4/P5 build on them they are not.
 
 Visual/demonstration layer added 2026-07-27 after user feedback that static
@@ -359,7 +359,7 @@ Remaining before hardware, two reviewed slices:
   all ROS-free and unit-gated), `ros/player_node.py`, `ros/scene.py`,
   `urdf/fer_sysid_{real,mujoco}.urdf.xacro`,
   `launch/play_protocol.launch.py` and `scripts/run-protocol`.
-  Evidence: all six r2 protocols played end to end through
+  Evidence: all six canonical protocols played end to end through
   `mujoco_ros2_control` at full speed, plus a `--dry-run` path that runs
   every check and commands nothing. Gates in `tests/test_playback.py` and
   `tests/test_ros_scene.py`.

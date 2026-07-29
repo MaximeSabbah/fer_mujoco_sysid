@@ -109,11 +109,11 @@ def test_torque_residual_report() -> None:
 
 def test_regressor_report_on_a_real_protocol(model_paths: ModelPaths) -> None:
     """The committed campaign must be well excited for friction."""
-    from fer_mujoco_sysid.campaign import CAMPAIGN, CAMPAIGN_REVISION, repository_root
+    from fer_mujoco_sysid.campaign import CAMPAIGN, repository_root
     from fer_mujoco_sysid.excitation import load_protocol_bundle
 
     _, arrays = load_protocol_bundle(
-        repository_root() / "protocols" / CAMPAIGN[0].protocol_id / CAMPAIGN_REVISION
+        repository_root() / "protocols" / CAMPAIGN[0].protocol_id
     )
     report = friction_regressor_report(arrays["dq_rad_s"])
     assert report.is_well_excited(limit=10.0), report.condition_number

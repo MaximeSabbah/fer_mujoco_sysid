@@ -144,19 +144,30 @@ def inertial_parameters(
     spec: mujoco.MjSpec,
     model: mujoco.MjModel,
     *,
-    bodies: Sequence[str] = MOVING_LINK_BODIES,
+    bodies: Sequence[str] | None = None,
     inertia_type: sysid.InertiaType = sysid.InertiaType.Pseudo,
 ) -> sysid.ParameterDict:
-    """Per-body inertia parameters, nominal = the spec's current inertials.
+    """Explicit per-body inertia parameters for diagnostics and research.
 
     ``Pseudo`` (default) is the physically consistent parameterization —
-    every candidate inertia is realizable by construction. *spec* is only
-    read here. Estimate ``MOVING_LINK_BODIES`` at most: parameters for
-    ``link7`` represent the whole rigid tool composite (see
-    ``TOOL_COMPOSITE_BODIES``); estimating hand/finger bodies alongside
-    ``link7`` is structurally unidentifiable and must be rejected by a
-    :func:`conditioning_report` check.
+    every candidate inertia is realizable by construction. Callers must name
+    the bodies explicitly: silently constructing the seven-link, 70-scalar
+    block would make an unobservable fit look like a supported production
+    workflow. Prefer :func:`cad_prior_inertial_parameters` for released fits.
+
+    *spec* is only read here. Parameters for ``link7`` represent the whole
+    rigid tool composite (see ``TOOL_COMPOSITE_BODIES``); estimating
+    hand/finger bodies alongside ``link7`` is structurally unidentifiable and
+    must be rejected by a :func:`conditioning_report` check.
     """
+    if bodies is None:
+        raise ValueError(
+            "the blind seven-link inertial block is not releasable; pass an "
+            "explicit body subset for diagnostics, or use "
+            "cad_prior_inertial_parameters() for a constrained fit"
+        )
+    if not bodies:
+        raise ValueError("at least one explicit inertial body is required")
     parameters = sysid.ParameterDict()
     for body_name in bodies:
         modifier = None
@@ -178,6 +189,225 @@ def inertial_parameters(
     return parameters
 
 
+def body_full_inertia(
+    model: mujoco.MjModel, body_name: str | int
+) -> NDArray[np.float64]:
+    """Return a body's full inertia tensor in its body frame.
+
+    MuJoCo stores the compiled tensor as principal moments plus the
+    ``body_iquat`` rotation. Export and CAD-prior corrections use the six
+    unambiguous body-frame entries ``(Ixx, Iyy, Izz, Ixy, Ixz, Iyz)``;
+    unlike an eigen-quaternion, this representation has no sign ambiguity.
+    """
+    body = model.body(body_name)
+    rotation_flat = np.empty(9, dtype=np.float64)
+    mujoco.mju_quat2Mat(rotation_flat, np.asarray(body.iquat, dtype=np.float64))
+    rotation = rotation_flat.reshape(3, 3)
+    tensor = rotation @ np.diag(np.asarray(body.inertia, dtype=np.float64)) @ rotation.T
+    tensor = 0.5 * (tensor + tensor.T)
+    return np.array(
+        (
+            tensor[0, 0],
+            tensor[1, 1],
+            tensor[2, 2],
+            tensor[0, 1],
+            tensor[0, 2],
+            tensor[1, 2],
+        ),
+        dtype=np.float64,
+    )
+
+
+@dataclass(frozen=True)
+class BodyInertialCorrection:
+    """A small, CAD-prior correction group for one explicitly chosen body.
+
+    Each enabled component is scalar and tightly bounded around the compiled
+    nominal model. ``inertia_scale`` scales the complete body-frame tensor,
+    preserving its principal axes and triangle inequalities. This deliberately
+    does not expose the ten unconstrained raw inertial coordinates.
+
+    Selection is only a candidate declaration. Call
+    :func:`select_observable_subset` on the actual protocol sequences before
+    fitting; corrections that the data do not distinguish stay frozen at
+    their CAD values.
+    """
+
+    body: str
+    estimate_mass: bool = True
+    com_axes: tuple[int, ...] = ()
+    estimate_inertia_scale: bool = False
+    mass_scale_bounds: tuple[float, float] = (0.7, 1.3)
+    com_offset_bound_m: float = 0.02
+    inertia_scale_bounds: tuple[float, float] = (0.7, 1.3)
+
+    def validate(self) -> None:
+        if not self.body:
+            raise ValueError("body correction requires a body name")
+        if not (self.estimate_mass or self.com_axes or self.estimate_inertia_scale):
+            raise ValueError(
+                f"{self.body}: enable mass, at least one COM axis, or inertia scale"
+            )
+        if len(set(self.com_axes)) != len(self.com_axes) or any(
+            axis not in (0, 1, 2) for axis in self.com_axes
+        ):
+            raise ValueError(
+                f"{self.body}: com_axes must be unique indices chosen from 0, 1, 2"
+            )
+        for label, bounds in (
+            ("mass_scale_bounds", self.mass_scale_bounds),
+            ("inertia_scale_bounds", self.inertia_scale_bounds),
+        ):
+            if (
+                len(bounds) != 2
+                or not np.isfinite(bounds).all()
+                or bounds[0] <= 0.0
+                or not bounds[0] < 1.0 < bounds[1]
+            ):
+                raise ValueError(
+                    f"{self.body}: {label} must be finite, positive, and "
+                    "strictly contain the CAD scale 1.0"
+                )
+        if not np.isfinite(self.com_offset_bound_m) or self.com_offset_bound_m <= 0.0:
+            raise ValueError(
+                f"{self.body}: com_offset_bound_m must be finite and positive"
+            )
+
+
+def cad_prior_inertial_parameters(
+    spec: mujoco.MjSpec,
+    model: mujoco.MjModel,
+    corrections: Sequence[BodyInertialCorrection],
+) -> sysid.ParameterDict:
+    """Build a low-dimensional, selected-body correction block.
+
+    Modifiers write absolute values derived from the supplied compiled CAD
+    model, so repeated residual evaluations are idempotent. The *spec*
+    argument is checked for the selected bodies but otherwise left untouched.
+    """
+    if not corrections:
+        raise ValueError("at least one body correction is required")
+    names = [correction.body for correction in corrections]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(
+            "duplicate body corrections are ambiguous: " + ", ".join(duplicates)
+        )
+
+    parameters = sysid.ParameterDict()
+    axis_names = ("x", "y", "z")
+    for correction in corrections:
+        correction.validate()
+        # Resolve both views now so a misspelled body fails before fitting.
+        spec.body(correction.body)
+        body = model.body(correction.body)
+        nominal_mass = float(body.mass[0])
+        nominal_com = np.asarray(body.ipos, dtype=np.float64).copy()
+        nominal_inertia = body_full_inertia(model, correction.body)
+
+        if correction.estimate_mass:
+            parameters.add(
+                sysid.Parameter(
+                    f"{correction.body}_mass_scale",
+                    nominal=1.0,
+                    min_value=correction.mass_scale_bounds[0],
+                    max_value=correction.mass_scale_bounds[1],
+                    modifier=_body_mass_scale_modifier(correction.body, nominal_mass),
+                )
+            )
+
+        for axis in correction.com_axes:
+            parameters.add(
+                sysid.Parameter(
+                    f"{correction.body}_com_{axis_names[axis]}_offset_m",
+                    nominal=0.0,
+                    min_value=-correction.com_offset_bound_m,
+                    max_value=correction.com_offset_bound_m,
+                    modifier=_body_com_offset_modifier(
+                        correction.body, nominal_com, axis
+                    ),
+                )
+            )
+
+        if correction.estimate_inertia_scale:
+            parameters.add(
+                sysid.Parameter(
+                    f"{correction.body}_inertia_scale",
+                    nominal=1.0,
+                    min_value=correction.inertia_scale_bounds[0],
+                    max_value=correction.inertia_scale_bounds[1],
+                    modifier=_body_inertia_scale_modifier(
+                        correction.body, nominal_inertia
+                    ),
+                )
+            )
+    return parameters
+
+
+def _body_mass_scale_modifier(body_name: str, nominal_mass: float) -> Any:
+    def modifier(target: mujoco.MjSpec, parameter: sysid.Parameter) -> None:
+        target.body(body_name).mass = nominal_mass * float(parameter.value[0])
+
+    return modifier
+
+
+def _body_com_offset_modifier(
+    body_name: str, nominal_com: NDArray[np.float64], axis: int
+) -> Any:
+    def modifier(target: mujoco.MjSpec, parameter: sysid.Parameter) -> None:
+        _set_body_com_offset(
+            target.body(body_name),
+            nominal_com,
+            axis,
+            float(parameter.value[0]),
+        )
+
+    return modifier
+
+
+def _body_inertia_scale_modifier(
+    body_name: str, nominal_inertia: NDArray[np.float64]
+) -> Any:
+    def modifier(target: mujoco.MjSpec, parameter: sysid.Parameter) -> None:
+        _set_body_full_inertia(
+            target.body(body_name),
+            nominal_inertia * float(parameter.value[0]),
+        )
+
+    return modifier
+
+
+def _set_body_com_offset(
+    body: mujoco.MjsBody,
+    nominal_com: NDArray[np.float64],
+    axis: int,
+    offset_m: float,
+) -> None:
+    """Write one COM offset while preserving the other CAD coordinates."""
+    ipos = np.asarray(body.ipos, dtype=np.float64).copy()
+    ipos[axis] = nominal_com[axis] + offset_m
+    body.ipos = ipos
+
+
+def _set_body_full_inertia(
+    body: mujoco.MjsBody, full_inertia: NDArray[np.float64]
+) -> None:
+    """Select MuJoCo's full-tensor input representation."""
+    body.inertia[:] = 0.0
+    body.iquat[:] = np.nan
+    body.fullinertia[:] = np.asarray(full_inertia, dtype=np.float64)
+
+
+def combine_parameters(*groups: sysid.ParameterDict) -> sysid.ParameterDict:
+    """Deep-copy and combine parameter groups, rejecting duplicate names."""
+    if not groups:
+        raise ValueError("at least one parameter group is required")
+    combined = sysid.ParameterDict()
+    for group in groups:
+        combined.update(group.copy())
+    return combined
+
+
 @dataclass(frozen=True)
 class MeasuredRun:
     """One recorded playback: applied torque and measured joint states.
@@ -187,11 +417,11 @@ class MeasuredRun:
     built with ``joint_state_sensors=True``). Times are seconds on one clock.
 
     Row convention (mirrors ``mujoco.rollout``): ``measured[k]`` holds the
-    joint state after the first ``k`` control rows have been applied — the
-    state at ``k * dt``, i.e. the sensor row MuJoCo emits after step ``k`` —
-    stamped with the post-step time ``(k + 1) * dt``. Predicted rollouts carry
-    the identical skew, so measured and predicted rows align index-for-index;
-    do not "fix" the stamps on one side only.
+    pre-integration sensor state from which ``control[k]`` is applied. MuJoCo
+    exposes that sensor row after the step and the toolbox stamps it at
+    ``(k + 1) * dt``, although its q/dq values are the state at ``k * dt``.
+    Controller feedback and same-row effort follow the same numeric ordering.
+    Predicted and measured rows therefore align index-for-index.
     """
 
     label: str
@@ -232,6 +462,8 @@ def measurement_sequences(
     *,
     label: str = "fer_arm",
     window_s: float | None = None,
+    max_windows_per_run: int | None = None,
+    measurement_stride: int = 1,
 ) -> sysid.ModelSequences:
     """Bundle measured runs with the identification spec for fitting.
 
@@ -243,6 +475,10 @@ def measurement_sequences(
     """
     if not runs:
         raise ValueError("at least one measured run is required")
+    if max_windows_per_run is not None and max_windows_per_run < 1:
+        raise ValueError("max_windows_per_run must be positive")
+    if measurement_stride < 1:
+        raise ValueError("measurement_stride must be positive")
     model = spec.compile()
 
     labels: list[str] = []
@@ -270,10 +506,11 @@ def measurement_sequences(
             bounds = [(0, len(control_times))]
         else:
             steps = max(int(round(window_s / model.opt.timestep)), 2)
-            bounds = [
+            all_bounds = [
                 (start, min(start + steps, len(control_times)))
                 for start in range(0, len(control_times), steps)
             ]
+            bounds = _representative_bounds(all_bounds, maximum=max_windows_per_run)
             qpos_cols, qvel_cols = _joint_state_columns(model)
 
         for start, stop in bounds:
@@ -283,22 +520,41 @@ def measurement_sequences(
                 qpos0 = np.asarray(run.qpos0, dtype=np.float64)
                 qvel0 = np.asarray(run.qvel0, dtype=np.float64)
             else:
-                # measured[start] is the state at start*dt (see MeasuredRun),
-                # exactly the state from which control[start] is applied.
+                # measured[start] is the pre-integration sensor state from
+                # which control[start] is applied (see MeasuredRun).
                 qpos0 = measured[start, qpos_cols]
                 qvel0 = measured[start, qvel_cols]
-            origin = control_times[start]
+            window_samples = stop - start
+            # These runs have already been resampled onto the model grid.
+            # Reconstruct local times from integer row indices instead of
+            # subtracting large absolute timestamps: the latter can push the
+            # endpoint above an exact timestep multiple and trigger an extra
+            # interpolated control row inside mujoco.sysid.
+            window_control_times = _resampling_safe_control_times(
+                window_samples,
+                float(model.opt.timestep),
+            )
+            measured_indices = np.arange(
+                start,
+                stop,
+                measurement_stride,
+                dtype=np.int64,
+            )
+            window_measured_times = (
+                measured_indices - start + 1
+            ) * float(model.opt.timestep)
             labels.append(f"{run.label}[{start}:{stop}]")
             initial_states.append(sysid.create_initial_state(model, qpos0, qvel0))
             control_series.append(
                 sysid.TimeSeries(
-                    control_times[start:stop] - origin, control[start:stop]
+                    window_control_times,
+                    control[start:stop],
                 )
             )
             measured_series.append(
                 sysid.TimeSeries.from_names(
-                    measured_times[start:stop] - origin,
-                    measured[start:stop],
+                    window_measured_times,
+                    measured[start:stop:measurement_stride],
                     model,
                 )
             )
@@ -311,6 +567,44 @@ def measurement_sequences(
         control_series,
         measured_series,
     )
+
+
+def _resampling_safe_control_times(
+    samples: int,
+    timestep: float,
+) -> NDArray[np.float64]:
+    """Return a uniform grid that the SysID resampler cannot lengthen.
+
+    ``mujoco.sysid`` reconstructs a control grid with
+    ``ceil(duration / timestep)``.  Re-zeroing timestamps by subtracting a
+    large recording time can leave an endpoint a few ulps above the intended
+    integer multiple.  The resampler then invents one extra row and linearly
+    distorts every control in the window.
+
+    Moving only the endpoint one representable float toward zero preserves the
+    physical sample grid while making the intended row count unambiguous.
+    ``linspace`` is used here because the toolbox uses the same construction;
+    resampling therefore leaves the control values bit-for-bit unchanged.
+    """
+    if samples < 2:
+        raise ValueError("a control window requires at least two samples")
+    endpoint = np.nextafter((samples - 1) * timestep, 0.0)
+    return np.linspace(0.0, endpoint, samples, dtype=np.float64)
+
+
+def _representative_bounds(
+    bounds: Sequence[tuple[int, int]],
+    *,
+    maximum: int | None,
+) -> list[tuple[int, int]]:
+    """Choose evenly distributed rollout windows without changing their rows."""
+    available = list(bounds)
+    if maximum is None or len(available) <= maximum:
+        return available
+    indices = np.floor(
+        (np.arange(maximum, dtype=np.float64) + 0.5) * len(available) / maximum
+    ).astype(int)
+    return [available[int(index)] for index in indices]
 
 
 @dataclass(frozen=True)
@@ -395,6 +689,8 @@ class ConditioningReport:
 
     scaled_singular_values: NDArray[np.float64]
     parameter_correlations: NDArray[np.float64]
+    scaled_jacobian: NDArray[np.float64]
+    component_names: tuple[str, ...]
     objective: float
 
     @property
@@ -440,7 +736,229 @@ def conditioning_report(
     return ConditioningReport(
         scaled_singular_values=_scaled_singular_values(jacobian, parameters),
         parameter_correlations=_correlations(covariance),
+        scaled_jacobian=jacobian * (0.5 * (upper - lower))[np.newaxis, :],
+        component_names=tuple(parameters.get_non_frozen_parameter_names()),
         objective=float(np.dot(r0.ravel(), r0.ravel())),
+    )
+
+
+def _worst_off_diagonal(correlations: NDArray[np.float64]) -> float:
+    if correlations.ndim != 2 or correlations.shape[0] < 2:
+        return 0.0
+    off_diagonal = np.abs(correlations.copy())
+    np.fill_diagonal(off_diagonal, 0.0)
+    return float(np.nanmax(off_diagonal))
+
+
+class IdentificationAcceptanceError(RuntimeError):
+    """An identification block failed an observability or release gate."""
+
+
+@dataclass(frozen=True)
+class AcceptanceReport:
+    """Machine-readable reasons why a parameter result may or may not ship."""
+
+    problems: tuple[str, ...]
+    conditioning_ratio: float
+    worst_correlation: float
+    objective_reduction: float | None = None
+    bound_hits: tuple[str, ...] = ()
+    maximum_multistart_spread: float | None = None
+
+    @property
+    def accepted(self) -> bool:
+        return not self.problems
+
+    def require(self, label: str = "identification") -> None:
+        if self.problems:
+            raise IdentificationAcceptanceError(
+                f"{label} rejected: " + "; ".join(self.problems)
+            )
+
+
+def conditioning_acceptance(
+    report: ConditioningReport,
+    *,
+    minimum_conditioning_ratio: float = CONDITIONING_RATIO_MINIMUM,
+    correlation_limit: float = CORRELATION_FREEZE_LIMIT,
+) -> AcceptanceReport:
+    """Apply the production pre-fit release thresholds to a Jacobian report."""
+    problems: list[str] = []
+    ratio = report.conditioning_ratio
+    worst_correlation = _worst_off_diagonal(report.parameter_correlations)
+    if not np.isfinite(report.objective):
+        problems.append("the nominal objective is not finite")
+    if not report.scaled_singular_values.size:
+        problems.append("the block has no active parameter sensitivity")
+    elif not np.isfinite(report.scaled_singular_values).all():
+        problems.append("the scaled Jacobian singular values are not finite")
+    elif ratio < minimum_conditioning_ratio:
+        problems.append(
+            f"scaled Jacobian conditioning ratio {ratio:.3g} is below "
+            f"{minimum_conditioning_ratio:.3g}"
+        )
+    if not np.isfinite(report.parameter_correlations).all():
+        problems.append("parameter correlations are not finite")
+    elif worst_correlation > correlation_limit:
+        problems.append(
+            f"worst parameter correlation {worst_correlation:.3g} exceeds "
+            f"{correlation_limit:.3g}"
+        )
+    return AcceptanceReport(
+        problems=tuple(problems),
+        conditioning_ratio=ratio,
+        worst_correlation=worst_correlation,
+    )
+
+
+def require_observable(
+    parameters: sysid.ParameterDict,
+    sequences: sysid.ModelSequences | Sequence[sysid.ModelSequences],
+    *,
+    diff_step: float | None = None,
+    minimum_conditioning_ratio: float = CONDITIONING_RATIO_MINIMUM,
+    correlation_limit: float = CORRELATION_FREEZE_LIMIT,
+) -> ConditioningReport:
+    """Return pre-fit evidence, or fail closed when the block is confounded."""
+    report = conditioning_report(parameters, sequences, diff_step=diff_step)
+    conditioning_acceptance(
+        report,
+        minimum_conditioning_ratio=minimum_conditioning_ratio,
+        correlation_limit=correlation_limit,
+    ).require("parameter block")
+    return report
+
+
+@dataclass(frozen=True)
+class ObservableSubset:
+    """A deterministic scalar subset released by the local Jacobian.
+
+    ``parameters`` is a deep copy of the requested block with rejected
+    parameters frozen at their incoming values. ``sensitivity_ratios`` are
+    bound-scaled column norms relative to the strongest requested column.
+    """
+
+    parameters: sysid.ParameterDict
+    accepted_names: tuple[str, ...]
+    rejected_names: tuple[str, ...]
+    sensitivity_ratios: dict[str, float]
+    conditioning_ratio: float
+    worst_correlation: float
+
+    def require_nonempty(self, label: str = "parameter block") -> None:
+        if not self.accepted_names:
+            raise IdentificationAcceptanceError(
+                f"{label} rejected: no scalar correction is observable"
+            )
+
+
+def _subset_metrics(
+    scaled_jacobian: NDArray[np.float64], indices: Sequence[int]
+) -> tuple[float, float]:
+    if not indices:
+        return 0.0, 0.0
+    selected = scaled_jacobian[:, indices]
+    singular_values = np.linalg.svd(selected, compute_uv=False)
+    ratio = _conditioning_ratio(singular_values)
+    covariance = np.linalg.pinv(selected.T @ selected, rcond=1e-12)
+    return ratio, _worst_off_diagonal(_correlations(covariance))
+
+
+def select_observable_subset(
+    parameters: sysid.ParameterDict,
+    sequences: sysid.ModelSequences | Sequence[sysid.ModelSequences],
+    *,
+    diff_step: float | None = None,
+    minimum_conditioning_ratio: float = CONDITIONING_RATIO_MINIMUM,
+    correlation_limit: float = CORRELATION_FREEZE_LIMIT,
+    minimum_relative_sensitivity: float = 1e-6,
+) -> ObservableSubset:
+    """Freeze scalar corrections the supplied protocol cannot distinguish.
+
+    The deterministic greedy pivot starts with the strongest bound-scaled
+    Jacobian column, then repeatedly admits the candidate with the largest
+    sensitivity orthogonal to the retained span. A candidate is released only
+    if its independent sensitivity, the retained block's scaled SVD ratio,
+    and its covariance correlation all pass the requested thresholds.
+
+    This is a local observability decision at the current CAD prior, not a
+    claim that the rejected physical coordinates were identified. Vector
+    parameters are refused because MuJoCo freezes a whole ``Parameter`` at
+    once; the CAD-prior and armature builders intentionally emit scalars.
+    """
+    if not 0.0 <= minimum_relative_sensitivity <= 1.0:
+        raise ValueError("minimum_relative_sensitivity must lie in [0, 1]")
+    active = [
+        (name, parameter)
+        for name, parameter in parameters.items()
+        if not parameter.frozen
+    ]
+    non_scalar = [name for name, parameter in active if parameter.size != 1]
+    if non_scalar:
+        raise ValueError(
+            "observable subset selection requires scalar parameters; split "
+            "or reparameterize: " + ", ".join(non_scalar)
+        )
+
+    report = conditioning_report(parameters, sequences, diff_step=diff_step)
+    names = report.component_names
+    jacobian = report.scaled_jacobian
+    if jacobian.shape[1] != len(names):
+        raise RuntimeError("conditioning report lost its parameter-column mapping")
+
+    norms = np.linalg.norm(jacobian, axis=0)
+    strongest = float(norms.max()) if norms.size else 0.0
+    ratios = {
+        name: (float(norms[index]) / strongest if strongest > 0.0 else 0.0)
+        for index, name in enumerate(names)
+    }
+    eligible = {
+        index
+        for index, norm in enumerate(norms)
+        if strongest > 0.0
+        and np.isfinite(norm)
+        and float(norm) / strongest >= minimum_relative_sensitivity
+    }
+    accepted: list[int] = []
+
+    while eligible:
+        passing: list[tuple[float, float, int]] = []
+        if accepted:
+            basis, _ = np.linalg.qr(jacobian[:, accepted], mode="reduced")
+        else:
+            basis = np.empty((jacobian.shape[0], 0), dtype=np.float64)
+        for index in sorted(eligible):
+            column = jacobian[:, index]
+            independent = column - basis @ (basis.T @ column)
+            independent_ratio = float(np.linalg.norm(independent)) / strongest
+            if independent_ratio < minimum_relative_sensitivity:
+                continue
+            ratio, correlation = _subset_metrics(jacobian, (*accepted, index))
+            if ratio >= minimum_conditioning_ratio and correlation <= correlation_limit:
+                # Higher orthogonal sensitivity wins; then higher raw
+                # sensitivity; finally earlier input order for stable ties.
+                passing.append((independent_ratio, float(norms[index]), -index))
+        if not passing:
+            break
+        _, _, negative_index = max(passing)
+        selected = -negative_index
+        accepted.append(selected)
+        eligible.remove(selected)
+
+    accepted_names = tuple(names[index] for index in accepted)
+    accepted_set = set(accepted_names)
+    rejected_names = tuple(name for name in names if name not in accepted_set)
+    released = parameters.copy()
+    for name in rejected_names:
+        released[name].frozen = True
+    ratio, correlation = _subset_metrics(jacobian, accepted)
+    return ObservableSubset(
+        parameters=released,
+        accepted_names=accepted_names,
+        rejected_names=rejected_names,
+        sensitivity_ratios=ratios,
+        conditioning_ratio=ratio,
+        worst_correlation=correlation,
     )
 
 
@@ -582,15 +1100,26 @@ class MultistartResult:
 
     @property
     def value_spread(self) -> dict[str, float]:
-        """Largest relative deviation from the best fit, per parameter."""
+        """Largest deviation from the best fit as a fraction of box span.
+
+        Box-span normalization is meaningful for zero-centered corrections
+        such as COM offsets. Dividing by the fitted value would turn harmless
+        numerical disagreement around zero into an arbitrarily large spread.
+        """
         best = self.best
         spread: dict[str, float] = {}
         for name, reference in best.values.items():
-            scale = max(float(np.abs(reference).max()), 1e-12)
-            spread[name] = max(
-                float(np.abs(result.values[name] - reference).max()) / scale
+            parameter = best.parameters[name]
+            lower, upper = parameter.get_bounds()
+            span = upper - lower
+            fallback = np.maximum(np.abs(np.asarray(reference).ravel()), 1e-12)
+            scale = np.where(span > 0.0, span, fallback)
+            deviations = (
+                np.abs(np.asarray(result.values[name]).ravel() - reference.ravel())
+                / scale
                 for result in self.results
             )
+            spread[name] = max(float(np.max(deviation)) for deviation in deviations)
         return spread
 
 
@@ -629,3 +1158,103 @@ def fit_multistart(
             )
         )
     return MultistartResult(results=results)
+
+
+def fit_acceptance(
+    result: FitResult,
+    *,
+    multistart: MultistartResult | None = None,
+    minimum_objective_reduction: float = 0.0,
+    reject_bound_hits: bool = True,
+    minimum_conditioning_ratio: float = CONDITIONING_RATIO_MINIMUM,
+    correlation_limit: float = CORRELATION_FREEZE_LIMIT,
+    maximum_multistart_spread: float = 0.05,
+) -> AcceptanceReport:
+    """Apply fail-closed post-fit release gates.
+
+    This gate intentionally contains no sample-rate assumption. The Jacobian
+    and objective are evaluated on the synchronized sequences supplied by the
+    caller, whether those observations originated at 100 Hz or were decimated
+    to it. Timestamp/skew validation must happen when those sequences are
+    constructed.
+    """
+    problems: list[str] = []
+    ratio = result.conditioning_ratio
+    worst_correlation = _worst_off_diagonal(result.parameter_correlations)
+    if not np.isfinite(result.initial_objective) or not np.isfinite(
+        result.final_objective
+    ):
+        problems.append("fit objective is not finite")
+    if result.final_objective > result.initial_objective:
+        problems.append("fit made the objective worse")
+    if result.objective_reduction < minimum_objective_reduction:
+        problems.append(
+            f"objective reduction {result.objective_reduction:.3g} is below "
+            f"{minimum_objective_reduction:.3g}"
+        )
+    if not result.scaled_singular_values.size:
+        problems.append("optimizer returned no Jacobian conditioning evidence")
+    elif not np.isfinite(result.scaled_singular_values).all():
+        problems.append("scaled Jacobian singular values are not finite")
+    elif ratio < minimum_conditioning_ratio:
+        problems.append(
+            f"scaled Jacobian conditioning ratio {ratio:.3g} is below "
+            f"{minimum_conditioning_ratio:.3g}"
+        )
+    if not np.isfinite(result.parameter_correlations).all():
+        problems.append("parameter correlations are not finite")
+    elif worst_correlation > correlation_limit:
+        problems.append(
+            f"worst parameter correlation {worst_correlation:.3g} exceeds "
+            f"{correlation_limit:.3g}"
+        )
+
+    bound_hits = tuple(result.bound_hits)
+    if reject_bound_hits and bound_hits:
+        problems.append("parameters hit a box bound: " + ", ".join(bound_hits))
+
+    observed_spread: float | None = None
+    if multistart is not None:
+        spreads = tuple(multistart.value_spread.values())
+        observed_spread = max(spreads, default=0.0)
+        if not np.isfinite(observed_spread):
+            problems.append("multistart parameter spread is not finite")
+        elif observed_spread > maximum_multistart_spread:
+            problems.append(
+                f"multistart spread {observed_spread:.3g} exceeds "
+                f"{maximum_multistart_spread:.3g}"
+            )
+
+    return AcceptanceReport(
+        problems=tuple(problems),
+        conditioning_ratio=ratio,
+        worst_correlation=worst_correlation,
+        objective_reduction=result.objective_reduction,
+        bound_hits=bound_hits,
+        maximum_multistart_spread=observed_spread,
+    )
+
+
+def require_acceptable_fit(
+    result: FitResult,
+    *,
+    multistart: MultistartResult | None = None,
+    label: str = "fit",
+    minimum_objective_reduction: float = 0.0,
+    reject_bound_hits: bool = True,
+    minimum_conditioning_ratio: float = CONDITIONING_RATIO_MINIMUM,
+    correlation_limit: float = CORRELATION_FREEZE_LIMIT,
+    maximum_multistart_spread: float = 0.05,
+) -> AcceptanceReport:
+    """Return release evidence, or raise when a fitted block may not ship."""
+    report = fit_acceptance(
+        result,
+        multistart=multistart,
+        minimum_objective_reduction=minimum_objective_reduction,
+        reject_bound_hits=reject_bound_hits,
+        minimum_conditioning_ratio=minimum_conditioning_ratio,
+        correlation_limit=correlation_limit,
+        maximum_multistart_spread=maximum_multistart_spread,
+    )
+    report.require(label)
+    return report

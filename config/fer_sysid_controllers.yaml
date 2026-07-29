@@ -34,6 +34,10 @@ controller_manager:
 franka_robot_state_broadcaster:
   ros__parameters:
     arm_id: fer
+    # Proven collection rate on the real stack. Higher publication rates
+    # caused incomplete recordings, so identification treats this telemetry
+    # as a lower-rate diagnostic/applied-torque channel and excludes actuator
+    # transients that it cannot resolve.
     update_rate: 100
 
 fer_sysid_arm_controller:

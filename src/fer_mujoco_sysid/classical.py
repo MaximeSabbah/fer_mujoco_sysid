@@ -37,6 +37,12 @@ from numpy.typing import NDArray
 #: frictionloss low by 2-17%, and excluding them brought it to 0.1%.
 SLIDING_THRESHOLD_RAD_S = 0.03
 
+# Ten lags span 0.1 s at the intentional 100 Hz Franka telemetry rate. The
+# differentiated/filtered torque residual is serially correlated over several
+# samples, so treating every row as independent makes sigma percentages much
+# too optimistic.
+DEFAULT_HAC_LAGS = 10
+
 
 @dataclass(frozen=True)
 class LinearFrictionFit:
@@ -51,10 +57,14 @@ class LinearFrictionFit:
     damping_sigma_percent: NDArray[np.float64]
     #: Samples that survived the sliding threshold, per joint.
     samples: NDArray[np.intp]
+    #: Uncertainty estimator and its maximum serial-correlation lag.
+    covariance_method: str
+    covariance_lags: int
 
     def table(self) -> str:
         lines = [
-            "| joint | frictionloss [Nm] | sigma% | damping [Nm s/rad] | sigma% | cond(Y) | samples |",
+            "| joint | frictionloss [Nm] | sigma% | damping [Nm s/rad] "
+            "| sigma% | cond(Y) | samples |",
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
         for joint in range(len(self.frictionloss)):
@@ -67,6 +77,47 @@ class LinearFrictionFit:
                 f"| {int(self.samples[joint])} |"
             )
         return "\n".join(lines)
+
+
+def newey_west_covariance(
+    regressor: NDArray[np.float64],
+    residual: NDArray[np.float64],
+    *,
+    max_lags: int = DEFAULT_HAC_LAGS,
+) -> NDArray[np.float64]:
+    """Heteroskedasticity/autocorrelation-robust OLS covariance.
+
+    A Bartlett kernel gives nearby telemetry rows progressively less weight.
+    ``max_lags=0`` reduces to heteroskedasticity-robust HC1 covariance; the
+    default additionally accounts for 0.1 s of correlation at 100 Hz.
+    """
+    design = np.asarray(regressor, dtype=np.float64)
+    errors = np.asarray(residual, dtype=np.float64)
+    if design.ndim != 2 or errors.shape != (len(design),):
+        raise ValueError("regressor must be 2-D and residual must match its rows")
+    if not np.all(np.isfinite(design)) or not np.all(np.isfinite(errors)):
+        raise ValueError("regressor and residual must be finite")
+    rows, parameters = design.shape
+    if rows <= parameters:
+        raise ValueError(
+            f"need more rows than parameters for covariance, got {rows} and "
+            f"{parameters}"
+        )
+    if not isinstance(max_lags, int) or not 0 <= max_lags < rows:
+        raise ValueError(f"max_lags must be an integer in [0, {rows - 1}]")
+
+    bread = np.linalg.inv(design.T @ design)
+    scores = design * errors[:, None]
+    meat = scores.T @ scores
+    for lag in range(1, max_lags + 1):
+        weight = 1.0 - lag / (max_lags + 1.0)
+        lagged = scores[lag:].T @ scores[:-lag]
+        meat += weight * (lagged + lagged.T)
+
+    # HC1 small-sample correction. Symmetrization removes roundoff asymmetry
+    # before callers inspect the diagonal.
+    covariance = (rows / (rows - parameters)) * bread @ meat @ bread
+    return 0.5 * (covariance + covariance.T)
 
 
 def rigid_body_torque(
@@ -112,6 +163,7 @@ def fit_friction(
     tau_Nm: NDArray[np.float64],
     *,
     sliding_threshold_rad_s: float = SLIDING_THRESHOLD_RAD_S,
+    hac_lags: int = DEFAULT_HAC_LAGS,
 ) -> LinearFrictionFit:
     """Solve ``tau - tau_rigid = frictionloss*sign(dq) + damping*dq`` per joint.
 
@@ -119,6 +171,8 @@ def fit_friction(
     particular gravity, which is disabled when the torque channel is a
     gravity-compensated commanded effort.
     """
+    if not isinstance(hac_lags, int) or hac_lags < 0:
+        raise ValueError("hac_lags must be a non-negative integer")
     residual = np.asarray(tau_Nm, dtype=np.float64) - rigid_body_torque(
         model, q_rad, dq_rad_s, ddq_rad_s2
     )
@@ -150,9 +204,13 @@ def fit_friction(
         condition[joint] = float(np.linalg.cond(regressor / scale))
 
         error = target - regressor @ theta
-        variance = float(error @ error) / max(len(target) - 2, 1)
-        covariance = variance * np.linalg.inv(regressor.T @ regressor)
-        sigma[joint] = 100.0 * np.sqrt(np.diag(covariance)) / np.maximum(
+        effective_lags = min(hac_lags, len(target) - 1)
+        covariance = newey_west_covariance(
+            regressor, error, max_lags=effective_lags
+        )
+        sigma[joint] = 100.0 * np.sqrt(
+            np.maximum(np.diag(covariance), 0.0)
+        ) / np.maximum(
             np.abs(theta), 1e-12
         )
 
@@ -163,4 +221,6 @@ def fit_friction(
         frictionloss_sigma_percent=sigma[:, 0],
         damping_sigma_percent=sigma[:, 1],
         samples=counts,
+        covariance_method="Newey-West HAC" if hac_lags else "HC1",
+        covariance_lags=hac_lags,
     )
