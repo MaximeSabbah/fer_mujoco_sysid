@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<!--
+  Real FER for identification playback.
+
+  Kinematics, limits and inertials come from agimus_franka_description, the
+  same description the deployment stack runs, so the robot the protocols are
+  played on is described identically to the robot they will be deployed on.
+  The hand is always mounted: its mass is part of what is being identified
+  (the protocol manifests declare it as the payload), and removing it would
+  change the dynamics between identification and use.
+
+  Only the effort command interface is declared. Position and velocity
+  commands exist on this hardware, but declaring them would let a
+  misconfigured controller claim one, and the whole point of the effort-mode
+  choice is that identification runs in the same actuation mode as
+  deployment.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="fer">
+  <xacro:arg name="robot_ip" default=""/>
+  <xacro:arg name="ee_id" default="agimus_franka_hand"/>
+  <xacro:arg name="safety_distance" default="0.03"/>
+
+  <xacro:include filename="$(find agimus_franka_description)/robots/common/agimus_franka_robot.xacro"/>
+
+  <xacro:agimus_franka_robot
+    arm_id="fer"
+    joint_limits="${xacro.load_yaml('$(find agimus_franka_description)/robots/fer/joint_limits.yaml')}"
+    inertials="${xacro.load_yaml('$(find agimus_franka_description)/robots/fer/inertials.yaml')}"
+    kinematics="${xacro.load_yaml('$(find agimus_franka_description)/robots/fer/kinematics.yaml')}"
+    dynamics="${xacro.load_yaml('$(find agimus_franka_description)/robots/fer/dynamics.yaml')}"
+    hand="true"
+    ee_id="$(arg ee_id)"
+    with_sc="false"
+    ros2_control="false"
+    robot_ip="$(arg robot_ip)"
+    use_fake_hardware="false"
+    fake_sensor_commands="false"
+    no_prefix="false"
+    arm_prefix=""
+    connected_to="base"
+    use_ft_sensor="false"
+    robot_safety_distance="$(arg safety_distance)"/>
+
+  <ros2_control name="AgimusFrankaHardwareInterface" type="system">
+    <hardware>
+      <param name="version">1.0.0</param>
+      <param name="arm_id">fer</param>
+      <plugin>agimus_franka_hardware/AgimusFrankaHardwareInterface</plugin>
+      <param name="robot_ip">$(arg robot_ip)</param>
+    </hardware>
+
+    <xacro:macro name="fer_sysid_joint" params="name initial_position">
+      <joint name="${name}">
+        <command_interface name="effort"/>
+        <state_interface name="position">
+          <param name="initial_value">${initial_position}</param>
+        </state_interface>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+    </xacro:macro>
+
+    <xacro:fer_sysid_joint name="fer_joint1" initial_position="0.0"/>
+    <xacro:fer_sysid_joint name="fer_joint2" initial_position="-0.785"/>
+    <xacro:fer_sysid_joint name="fer_joint3" initial_position="0.0"/>
+    <xacro:fer_sysid_joint name="fer_joint4" initial_position="-2.356"/>
+    <xacro:fer_sysid_joint name="fer_joint5" initial_position="0.0"/>
+    <xacro:fer_sysid_joint name="fer_joint6" initial_position="1.571"/>
+    <xacro:fer_sysid_joint name="fer_joint7" initial_position="0.785"/>
+  </ros2_control>
+</robot>

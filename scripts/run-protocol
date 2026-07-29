@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Play one excitation protocol, simulated or on the robot.
+#
+#   ./scripts/run-protocol fer-friction-a
+#   ./scripts/run-protocol fer-friction-a --watch          # MuJoCo viewer + RViz
+#   ./scripts/run-protocol fer-friction-a --record                 # ...and save it
+#   ./scripts/run-protocol fer-friction-a --backend real --robot-ip 172.16.0.2
+#   ./scripts/run-protocol fer-inertial-a --backend real --robot-ip ... --speed-scale 0.5
+#   ./scripts/run-protocol fer-friction-a --backend real --robot-ip ... --dry-run
+#
+# The first argument is a protocol id from protocols/ (its newest revision is
+# used) or a path to a bundle revision directory.
+#
+# Two environments, on purpose. The simulation scene is generated in the
+# project's uv environment, which owns MuJoCo. Everything under ROS runs on
+# the ROS interpreter with the package on PYTHONPATH, because rclpy cannot be
+# installed from PyPI — and the ROS side needs only rclpy and NumPy.
+
+REPOSITORY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+ROS_SETUP="${FER_SYSID_ROS_SETUP:-/opt/ros/jazzy/setup.bash}"
+# The overlay carrying this project's ROS *dependencies* — the Franka
+# description, hardware interface and mujoco_ros2_control. Not a consumer
+# repository: nothing in this project depends on hydrax or sbmpc_ros being
+# built. Override with FER_SYSID_WORKSPACE_SETUP; skipped if absent.
+WORKSPACE_SETUP="${FER_SYSID_WORKSPACE_SETUP:-/opt/sbmpc_deps_ws/install/setup.bash}"
+
+usage() {
+  awk 'NR>3 {if (!/^#/) exit; sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}"
+  exit "${1:-0}"
+}
+
+[[ $# -ge 1 ]] || usage 1
+case "$1" in
+  -h | --help) usage 0 ;;
+esac
+
+PROTOCOL_ARGUMENT="$1"
+shift
+
+BACKEND="mujoco"
+START_OFFSET_RAD="0.1"
+RECORD_ROOT=""
+PLANT_FRICTION=""
+SPEED_SCALE="1.0"
+LAUNCH_ARGUMENTS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --backend)
+      BACKEND="$2"
+      LAUNCH_ARGUMENTS+=("backend:=$2")
+      shift 2
+      ;;
+    --robot-ip)
+      LAUNCH_ARGUMENTS+=("robot_ip:=$2")
+      shift 2
+      ;;
+    --speed-scale)
+      SPEED_SCALE="$2"
+      LAUNCH_ARGUMENTS+=("speed_scale:=$2")
+      shift 2
+      ;;
+    --approach-speed)
+      LAUNCH_ARGUMENTS+=("approach_speed_rad_s:=$2")
+      shift 2
+      ;;
+    --dry-run)
+      LAUNCH_ARGUMENTS+=("dry_run:=true")
+      shift
+      ;;
+    --viewer)
+      LAUNCH_ARGUMENTS+=("headless:=false")
+      shift
+      ;;
+    --rviz)
+      LAUNCH_ARGUMENTS+=("rviz:=true")
+      shift
+      ;;
+    --watch)
+      LAUNCH_ARGUMENTS+=("headless:=false" "rviz:=true")
+      shift
+      ;;
+    --start-offset)
+      START_OFFSET_RAD="$2"
+      shift 2
+      ;;
+    --record)
+      # Optional argument: bare --record uses output/<backend>/.
+      if [[ -n "${2:-}" && "$2" != --* ]]; then
+        RECORD_ROOT="$2"
+        shift 2
+      else
+        RECORD_ROOT="default"
+        shift
+      fi
+      ;;
+    --friction)
+      # Simulation only: give the plant known friction, so a fit from the
+      # recording has something to recover that it was never told.
+      PLANT_FRICTION="$2"
+      shift 2
+      ;;
+    *)
+      LAUNCH_ARGUMENTS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+# Resolve a protocol id to its newest committed revision.
+if [[ -d "${PROTOCOL_ARGUMENT}" ]]; then
+  PROTOCOL_PATH="$(cd "${PROTOCOL_ARGUMENT}" && pwd)"
+elif [[ -d "${REPOSITORY}/protocols/${PROTOCOL_ARGUMENT}" ]]; then
+  PROTOCOL_PATH="$(
+    find "${REPOSITORY}/protocols/${PROTOCOL_ARGUMENT}" -mindepth 1 -maxdepth 1 -type d |
+      sort | tail -n 1
+  )"
+else
+  echo "unknown protocol '${PROTOCOL_ARGUMENT}'. Available:" >&2
+  find "${REPOSITORY}/protocols" -mindepth 1 -maxdepth 1 -type d -printf '  %f\n' | sort >&2
+  exit 1
+fi
+
+if [[ ! -f "${PROTOCOL_PATH}/protocol.json" ]]; then
+  echo "no protocol bundle at ${PROTOCOL_PATH}" >&2
+  exit 1
+fi
+
+if [[ "${BACKEND}" == "real" ]]; then
+  echo
+  echo "  About to command the REAL robot."
+  echo "  protocol : ${PROTOCOL_PATH}"
+  echo "  Keep a hand on the emergency stop. Ctrl-C cancels the trajectory."
+  echo
+fi
+
+# The simulation scene is built here, before ROS is in the picture, using the
+# project's own environment. Nothing inside a ROS process imports MuJoCo: a
+# ROS environment carries whatever `mujoco` its own packages put on the path,
+# and the player must not depend on which one wins.
+if [[ "${BACKEND}" == "mujoco" ]]; then
+  SCENE_DIRECTORY="$(mktemp -d -t fer_sysid_scene.XXXXXX)"
+  trap 'rm -rf "${SCENE_DIRECTORY}"' EXIT
+  (
+    cd "${REPOSITORY}"
+    PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --locked python -m \
+      fer_mujoco_sysid.ros.scene "${SCENE_DIRECTORY}/scene.xml" \
+      --offset-rad "${START_OFFSET_RAD}" \
+      ${PLANT_FRICTION:+--friction "${PLANT_FRICTION}"}
+  ) >/dev/null
+  LAUNCH_ARGUMENTS+=("mujoco_scene:=${SCENE_DIRECTORY}/scene.xml")
+fi
+
+# The ROS setup scripts read unset variables; -u would abort on them.
+set +u
+# shellcheck source=/dev/null
+source "${ROS_SETUP}"
+if [[ -f "${WORKSPACE_SETUP}" ]]; then
+  # shellcheck source=/dev/null
+  source "${WORKSPACE_SETUP}"
+fi
+set -u
+
+export PYTHONPATH="${REPOSITORY}/src${PYTHONPATH:+:${PYTHONPATH}}"
+
+PROTOCOL_ID="$(basename "$(dirname "${PROTOCOL_PATH}")")"
+# Results are partitioned by where the data came from, under one output root.
+# "mujoco_ros" is this ROS stack against a simulated plant; "mujoco" is
+# reserved for the standalone in-process pipeline, which never touches ROS.
+if [[ "${BACKEND}" == "real" ]]; then
+  RECORD_BACKEND="real"
+else
+  RECORD_BACKEND="mujoco_ros"
+fi
+if [[ "${RECORD_ROOT}" == "default" ]]; then
+  RECORD_ROOT="${REPOSITORY}/output/${RECORD_BACKEND}"
+fi
+if [[ -n "${RECORD_ROOT}" ]]; then
+  RUN_DIR="${RECORD_ROOT}/${PROTOCOL_ID}"
+  mkdir -p "${RUN_DIR}"
+  LAUNCH_ARGUMENTS+=("record:=${RUN_DIR}/raw")
+fi
+
+ros2 launch "${REPOSITORY}/launch/play_protocol.launch.py" \
+  "protocol:=${PROTOCOL_PATH}" "${LAUNCH_ARGUMENTS[@]}"
+LAUNCH_STATUS=$?
+
+if [[ -n "${RECORD_ROOT}" && ${LAUNCH_STATUS} -eq 0 ]]; then
+  echo
+  echo "converting the recording ..."
+  PYTHONPATH="${REPOSITORY}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+    python3 -m fer_mujoco_sysid.ros.convert \
+      "${RUN_DIR}/raw" "${RUN_DIR}/recording" \
+      --protocol "${PROTOCOL_PATH}" \
+      --speed-scale "${SPEED_SCALE}" \
+      --backend "${RECORD_BACKEND}"
+  exit $?
+fi
+exit ${LAUNCH_STATUS}

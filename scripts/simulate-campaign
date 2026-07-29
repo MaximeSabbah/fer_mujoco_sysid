@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Play the campaign in-process — no ROS — and write recordings to
+# output/mujoco/, in the same format the ROS backend produces.
+#
+#   ./scripts/simulate-campaign                  # every protocol
+#   ./scripts/simulate-campaign --family friction
+#
+# Then fit them with the identical pipeline:
+#
+#   ./scripts/identify --backend mujoco
+
+export PYTHONUNBUFFERED=1
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+export MPLCONFIGDIR="${FER_SYSID_MPLCONFIGDIR:-/tmp/fer_mujoco_sysid_mpl}"
+export UV_CACHE_DIR="${FER_SYSID_UV_CACHE_DIR:-/tmp/fer_mujoco_sysid_uv_cache}"
+
+exec uv run --locked python -m fer_mujoco_sysid.simulate "$@"

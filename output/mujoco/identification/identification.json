@@ -1,0 +1,170 @@
+{
+  "backend": "mujoco",
+  "recordings": [
+    "/workspace/fer_mujoco_sysid/output/mujoco/fer-friction-a/recording",
+    "/workspace/fer_mujoco_sysid/output/mujoco/fer-friction-b/recording",
+    "/workspace/fer_mujoco_sysid/output/mujoco/fer-friction-holdout/recording",
+    "/workspace/fer_mujoco_sysid/output/mujoco/fer-inertial-a/recording",
+    "/workspace/fer_mujoco_sysid/output/mujoco/fer-inertial-b/recording",
+    "/workspace/fer_mujoco_sysid/output/mujoco/fer-inertial-holdout/recording"
+  ],
+  "rejected": [],
+  "train": [
+    "fer-friction-a",
+    "fer-friction-b",
+    "fer-inertial-a",
+    "fer-inertial-b"
+  ],
+  "holdout": [
+    "fer-friction-holdout",
+    "fer-inertial-holdout"
+  ],
+  "worst_condition_number": 2.330032357038806,
+  "frictionloss": [
+    1.3947271965942751,
+    1.1989554876150201,
+    1.0975814479477186,
+    1.4991683103520344,
+    0.34880094559050734,
+    1.1000518142387663,
+    0.5497774623958972
+  ],
+  "damping": [
+    2.034383998248304,
+    1.821521844458583,
+    1.5016400506314684,
+    1.9023845141992886,
+    0.8162179085349803,
+    0.6927707443338055,
+    0.4984765391302442
+  ],
+  "sigma_percent": [
+    0.005654390567876437,
+    0.05137565023275766,
+    0.01301783733328244,
+    0.11146322910161154,
+    0.008010064720627614,
+    0.047190666394660546,
+    0.007077776722133366,
+    0.05925871874484819,
+    0.007914927703779275,
+    0.03789908674128059,
+    0.0032957309213904875,
+    0.07601237568053383,
+    0.0052685089256629,
+    0.0875837370191594
+  ],
+  "rejected_parameters": [],
+  "objective_reduction": 0.777350125106746,
+  "held_out": {
+    "protocol_id": "fer-friction-holdout",
+    "horizons": {
+      "0.1s": {
+        "nominal": {
+          "worst_q_rmse_rad": 0.009751379486793393,
+          "gripper_rmse_mm": 3.9326241153943875,
+          "gripper_max_mm": 10.240805115113451
+        },
+        "classical": {
+          "worst_q_rmse_rad": 0.0003527004606246606,
+          "gripper_rmse_mm": 0.07364565823621635,
+          "gripper_max_mm": 0.3685076754514433
+        },
+        "identified": {
+          "worst_q_rmse_rad": 0.00020829327781541707,
+          "gripper_rmse_mm": 0.027471452902202383,
+          "gripper_max_mm": 0.22395293449811451
+        }
+      },
+      "0.5s": {
+        "nominal": {
+          "worst_q_rmse_rad": 0.14102166936266836,
+          "gripper_rmse_mm": 72.371308594611,
+          "gripper_max_mm": 186.8674119497468
+        },
+        "classical": {
+          "worst_q_rmse_rad": 0.0050313093650374025,
+          "gripper_rmse_mm": 1.1620879408663618,
+          "gripper_max_mm": 3.522058408286335
+        },
+        "identified": {
+          "worst_q_rmse_rad": 0.002495325385949396,
+          "gripper_rmse_mm": 0.2324748692568364,
+          "gripper_max_mm": 1.3371136399359038
+        }
+      },
+      "2s": {
+        "nominal": {
+          "worst_q_rmse_rad": 0.842192743580357,
+          "gripper_rmse_mm": 368.87881801871487,
+          "gripper_max_mm": 786.156855594169
+        },
+        "classical": {
+          "worst_q_rmse_rad": 0.02676989415776694,
+          "gripper_rmse_mm": 7.7932082057879715,
+          "gripper_max_mm": 19.54998250442063
+        },
+        "identified": {
+          "worst_q_rmse_rad": 0.007523271307076807,
+          "gripper_rmse_mm": 0.683832611578488,
+          "gripper_max_mm": 1.6480291809707535
+        }
+      }
+    },
+    "worst_torque_rmse_Nm": {
+      "nominal": 1.444375237022277,
+      "classical": 0.24245081311693215,
+      "identified": 0.24230762683489124
+    }
+  },
+  "classical": {
+    "frictionloss": [
+      1.4020927304089699,
+      1.2013030284355513,
+      1.095804530257595,
+      1.482392831281867,
+      0.34330872424415243,
+      1.071571259603627,
+      0.5291412538216113
+    ],
+    "damping": [
+      1.9884313734014316,
+      1.7738507647943669,
+      1.4868792825557304,
+      1.8830828773461268,
+      0.8014843880150727,
+      0.7200216731641595,
+      0.521278494745233
+    ],
+    "condition_number": [
+      2.3928832256900416,
+      2.433534965695069,
+      2.1257090327399064,
+      2.0158350579093574,
+      1.9857313692781084,
+      1.9764705651779266,
+      2.1135963907652844
+    ],
+    "frictionloss_sigma_percent": [
+      0.015520103955550306,
+      0.035694989612261155,
+      0.04612323552882902,
+      0.06618072668448798,
+      0.11051604117946527,
+      0.0865896414664428,
+      0.18372710895761257
+    ],
+    "damping_sigma_percent": [
+      0.04628999052554292,
+      0.09758723198912232,
+      0.08976527412357847,
+      0.10945720748878555,
+      0.08739401349028741,
+      0.22623480810008756,
+      0.4295625337943064
+    ]
+  },
+  "worst_method_disagreement_percent": 4.374236774554249,
+  "exported_model": "/workspace/fer_mujoco_sysid/output/mujoco/identification/fer_identified.xml",
+  "export_roundtrip_error": 4.514199288596643e-06
+}

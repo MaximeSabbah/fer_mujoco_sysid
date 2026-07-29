@@ -7,8 +7,13 @@ revision = "bdc4db9c249733c145f18eb5517b18e8c0e0c8b3"
 path = "hydrax/models/panda/panda.xml"
 sha256 = "7e8dfc2155ff5b87a10599b4b27b4aa000058e88fb9585aa803e6cb797f902d9"
 
+# Optional. A consumer's MJCF that identified parameters will eventually be
+# rendered into. Nothing in identification, protocol generation, playback or
+# simulation needs it — if this checkout is absent, the checks that compare
+# against it skip and everything else works unchanged.
 [models.sbmpc_ros]
 role = "deployment_target"
+required = false
 repository = "https://github.com/MaximeSabbah/sbmpc_ros.git"
 revision = "fe7dee2c6e669841e5e498f67af1419ebf7fc9b3"
 path = "sbmpc_bringup/mujoco/fer_ros2_control.xml"

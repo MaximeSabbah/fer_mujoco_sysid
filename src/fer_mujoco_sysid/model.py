@@ -9,8 +9,11 @@ from pathlib import Path
 
 import mujoco
 
+# Re-exported: the ROS-side joint order is defined with the bundle format,
+# which must stay importable without MuJoCo.
+from fer_mujoco_sysid.protocol import ROS_ARM_JOINT_NAMES
+
 HYDRAX_ARM_JOINT_NAMES = tuple(f"joint{i}" for i in range(1, 8))
-ROS_ARM_JOINT_NAMES = tuple(f"fer_joint{i}" for i in range(1, 8))
 ARM_JOINT_PAIRS = tuple(zip(HYDRAX_ARM_JOINT_NAMES, ROS_ARM_JOINT_NAMES, strict=True))
 
 HYDRAX_FINGER_JOINT_NAMES = ("finger_joint1", "finger_joint2")
@@ -30,30 +33,43 @@ WORKSPACE_ENV = "FER_SYSID_WORKSPACE_ROOT"
 
 @dataclass(frozen=True)
 class ModelPaths:
-    """Locations of the two read-only source MJCFs."""
+    """Locations of the read-only source MJCFs.
+
+    Only ``hydrax`` is required: it is the nominal model this project
+    identifies, generates protocols against, and simulates. ``ros_overlay``
+    is a *deployment target* — a consumer's MJCF that the identified
+    parameters will eventually be rendered into — and everything here works
+    without it. Nothing in the identification or playback path may depend on
+    a consumer repository being checked out.
+    """
 
     hydrax: Path
     ros_overlay: Path
 
     def require(self) -> ModelPaths:
-        """Return this contract after checking that both source files exist."""
-        missing = [
-            f"{label}: {path}"
-            for label, path in (
-                ("Hydrax model", self.hydrax),
-                ("sbmpc_ros model", self.ros_overlay),
-            )
-            if not path.is_file()
-        ]
-        if missing:
-            details = "\n".join(f"- {item}" for item in missing)
+        """Return this contract after checking the nominal model exists."""
+        if not self.hydrax.is_file():
             raise FileNotFoundError(
-                "FER source model(s) not found:\n"
-                f"{details}\n"
-                f"Set {HYDRAX_MODEL_ENV} and {ROS_MODEL_ENV}, or set "
-                f"{WORKSPACE_ENV} to their common workspace."
+                f"FER nominal model not found: {self.hydrax}\n"
+                f"Set {HYDRAX_MODEL_ENV}, or set {WORKSPACE_ENV} to the "
+                "workspace holding the hydrax checkout."
             )
         return self
+
+    @property
+    def has_ros_overlay(self) -> bool:
+        """Whether the optional deployment-target MJCF is available."""
+        return self.ros_overlay.is_file()
+
+    def require_ros_overlay(self) -> Path:
+        """The deployment-target MJCF, for the checks that compare against it."""
+        if not self.has_ros_overlay:
+            raise FileNotFoundError(
+                f"deployment-target model not found: {self.ros_overlay}\n"
+                f"It is optional — identification and playback do not need "
+                f"it. Set {ROS_MODEL_ENV} to compare against a consumer model."
+            )
+        return self.ros_overlay
 
 
 def _resolved_path(value: str | Path) -> Path:
@@ -153,12 +169,14 @@ def load_ros_overlay_model(
     *,
     mesh_directory: str | Path,
 ) -> mujoco.MjModel:
-    """Compile the ROS wrapper using an explicit, non-legacy mesh directory.
+    """Compile an optional consumer MJCF using an explicit mesh directory.
 
-    The checked-in ROS MJCF currently points at a deprecated absolute `sbmpc`
-    asset path. Hydrax carries the same meshes. Replacing only `meshdir` in
-    memory lets this standalone project verify the actual ROS robot XML without
-    depending on or modifying that deprecated checkout.
+    Only used by the compatibility checks that compare this project's nominal
+    model against a deployment target, and only when such a checkout exists
+    (see :meth:`ModelPaths.has_ros_overlay`). A consumer's MJCF may point its
+    `meshdir` anywhere, including at a path that no longer exists; the nominal
+    model carries the same meshes, so replacing `meshdir` in memory lets the
+    comparison run without depending on or modifying that checkout.
     """
     model_path = _resolved_path(model_path)
     mesh_directory = _resolved_path(mesh_directory)

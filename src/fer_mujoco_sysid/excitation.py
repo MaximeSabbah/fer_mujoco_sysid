@@ -35,7 +35,14 @@ from fer_mujoco_sysid.io import (
     write_checksums,
     write_json,
 )
-from fer_mujoco_sysid.model import ROS_ARM_JOINT_NAMES, build_hydrax_arm_spec
+from fer_mujoco_sysid.model import build_hydrax_arm_spec
+from fer_mujoco_sysid.protocol import (
+    ARRAY_UNITS,
+    PROTOCOL_FORMAT,
+    ROS_ARM_JOINT_NAMES,
+    load_protocol_bundle,
+    validate_protocol_manifest,
+)
 
 GENERATOR_NAME = "fer-mujoco-sysid/excitation"
 GENERATOR_VERSION = "0.1.0"
@@ -443,15 +450,6 @@ def _nominal_hydrax_source(workspace_root: str | Path | None) -> dict[str, str]:
     }
 
 
-PROTOCOL_FORMAT = "fer-mujoco-sysid/motion-protocol@2"
-ARRAY_UNITS = {
-    "time_s": "s",
-    "q_rad": "rad",
-    "dq_rad_s": "rad/s",
-    "ddq_rad_s2": "rad/s^2",
-}
-
-
 def _manifest(
     compiled: CompiledProtocol,
     model: mujoco.MjModel,
@@ -548,45 +546,6 @@ def _manifest(
     }
 
 
-def validate_protocol_manifest(
-    manifest: Mapping[str, object], arrays: Mapping[str, NDArray[np.float64]]
-) -> None:
-    """Check a protocol manifest against its arrays (structure and meaning)."""
-    if manifest.get("format") != PROTOCOL_FORMAT:
-        raise ArtifactError(f"unsupported protocol format: {manifest.get('format')!r}")
-    missing = set(ARRAY_UNITS) - set(arrays)
-    if missing:
-        raise ArtifactError(f"missing arrays: {sorted(missing)}")
-
-    time_s = np.asarray(arrays["time_s"])
-    samples = len(time_s)
-    if samples < 2 or not np.all(np.diff(time_s) > 0):
-        raise ArtifactError("time_s must be strictly increasing with >= 2 samples")
-    for key in ("q_rad", "dq_rad_s", "ddq_rad_s2"):
-        array = np.asarray(arrays[key])
-        if array.shape != (samples, 7):
-            raise ArtifactError(
-                f"{key} has shape {array.shape}, expected {(samples, 7)}"
-            )
-
-    playback = manifest.get("playback", {})
-    if list(playback.get("joint_order", [])) != list(ROS_ARM_JOINT_NAMES):
-        raise ArtifactError("joint_order does not match the canonical FER order")
-    if int(playback.get("samples", -1)) != samples:
-        raise ArtifactError("playback.samples disagrees with the arrays")
-
-    segments = manifest.get("segments", [])
-    if not segments:
-        raise ArtifactError("protocol declares no segments")
-    cursor = 0
-    for segment in segments:
-        if segment["start_index"] != cursor:
-            raise ArtifactError(f"segment {segment['segment_id']} is not contiguous")
-        cursor = segment["end_index_exclusive"]
-    if cursor != samples:
-        raise ArtifactError("segments do not cover every sample")
-
-
 def write_protocol_bundle(
     compiled: CompiledProtocol,
     protocols_root: str | Path,
@@ -626,24 +585,6 @@ def write_protocol_bundle(
     return root
 
 
-def load_protocol_bundle(
-    root: str | Path,
-) -> tuple[dict[str, object], dict[str, NDArray[np.float64]]]:
-    """Load a committed bundle, verifying checksums and content fingerprint."""
-    root = Path(root)
-    verify_checksums(root)
-    manifest = read_json(root / "protocol.json")
-    arrays = load_arrays(root / "desired.npz")
-    validate_protocol_manifest(manifest, arrays)
-    recomputed = content_sha256(manifest, arrays)
-    if recomputed != manifest["content_sha256"]:
-        raise ArtifactError(
-            f"{root}: content fingerprint mismatch "
-            f"({recomputed[:16]}... != {str(manifest['content_sha256'])[:16]}...)"
-        )
-    return manifest, arrays
-
-
 # --------------------------------------------------------------------------
 # Inertial family: per-joint finite Fourier series
 # --------------------------------------------------------------------------
@@ -659,23 +600,33 @@ class InertialProtocolSpec:
     inertias requires the links to move independently, which the friction
     family (one shared schedule) deliberately does not do.
 
-    The series starts and ends at rest at ``home_qpos`` by construction: it
-    is periodic over ``period_s``, and the coefficients are built so that
-    position, velocity and acceleration return to their initial values.
+    The series starts and ends at rest at ``home_qpos`` by construction, but
+    only because the base frequencies are **commensurate**: every joint's
+    frequency is an integer multiple of ``1 / duration``, so every joint
+    completes a whole number of cycles and lands back where it started.
+    Incommensurate frequencies leave each joint wherever its own cycle
+    happened to reach, and the trajectory then ends with a step back to the
+    home pose — which a trajectory controller answers with a torque spike.
+    :func:`_inertial_candidate` refuses to build such a spec.
+
+    Distinct integer multiples still decorrelate the joints, which is the
+    reason for per-joint frequencies in the first place.
     """
 
     protocol_id: str
     seed: int
     family_id: str = "fer-inertial"
     harmonics: int = 5
+    #: Multiples 2..8 of the 0.05 Hz fundamental implied by
+    #: ``periods / min(base_frequency_hz)`` = 20 s.
     base_frequency_hz: tuple[float, ...] = (
         0.10,
-        0.13,
-        0.17,
-        0.21,
-        0.26,
-        0.31,
-        0.37,
+        0.15,
+        0.20,
+        0.25,
+        0.30,
+        0.35,
+        0.40,
     )
     periods: int = 2
     amplitude_rad: tuple[float, ...] = (0.45, 0.35, 0.45, 0.35, 0.6, 0.6, 0.7)
@@ -728,12 +679,27 @@ def _inertial_candidate(
     """
     dt = spec.sample_period_s
     duration = spec.periods / min(spec.base_frequency_hz)
-    steps = int(round(duration / dt))
-    times = np.arange(steps) * dt
+    cycles = np.asarray(spec.base_frequency_hz, dtype=np.float64) * duration
+    incommensurate = np.abs(cycles - np.round(cycles)) > 1e-9
+    if incommensurate.any():
+        joint = int(np.argmax(incommensurate))
+        raise ValueError(
+            f"base_frequency_hz[{joint}] = {spec.base_frequency_hz[joint]} Hz "
+            f"completes {cycles[joint]:.4f} cycles over the {duration:g} s "
+            "protocol, not a whole number. The joint would stop mid-cycle and "
+            "the trajectory would end with a step back to the home pose. Use "
+            f"multiples of the {1.0 / duration:g} Hz fundamental."
+        )
 
-    q = np.empty((steps, 7))
-    dq = np.empty((steps, 7))
-    ddq = np.empty((steps, 7))
+    # Include the endpoint t = duration. There the series is exactly back at
+    # its start — position, velocity and acceleration all zero — so the
+    # trailing settle segment joins on continuously.
+    steps = int(round(duration / dt))
+    times = np.arange(steps + 1) * dt
+
+    q = np.empty((len(times), 7))
+    dq = np.empty((len(times), 7))
+    ddq = np.empty((len(times), 7))
     home = np.asarray(spec.home_qpos, dtype=np.float64)
     orders = np.arange(1, spec.harmonics + 1, dtype=np.float64)
     for joint in range(7):
@@ -804,7 +770,6 @@ def generate_inertial_protocol(
                 spec.sample_period_s,
                 position_margin_rad=spec.position_margin_rad,
                 limit_margin_fraction=spec.limit_margin_fraction,
-                check_consistency=False,
             )
         except ProtocolLimitError as error:
             failures.append(str(error))

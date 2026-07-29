@@ -56,7 +56,7 @@ def test_committed_campaign_conditions_friction_block(
     model_paths: ModelPaths, nominal_model: mujoco.MjModel
 ) -> None:
     """Simulated playback of the canonical protocol identifies the full
-    friction block (the numbers reported in docs/protocol_review/summary.md)."""
+    friction block (the numbers reported in protocols/review/summary.md)."""
     compiled = generate_friction_protocol(CAMPAIGN[0], nominal_model)
     run = tracking_run(nominal_model, compiled)
     sequences = measurement_sequences(

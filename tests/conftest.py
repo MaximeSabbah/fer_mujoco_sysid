@@ -22,6 +22,14 @@ def hydrax_model(model_paths: ModelPaths) -> mujoco.MjModel:
 
 @pytest.fixture(scope="session")
 def ros_model(model_paths: ModelPaths) -> mujoco.MjModel:
+    """A consumer's deployment MJCF, when one is checked out.
+
+    Optional on purpose: identification and playback never need a consumer
+    repository, so its absence skips the compatibility checks rather than
+    failing the suite.
+    """
+    if not model_paths.has_ros_overlay:
+        pytest.skip(f"no deployment-target model at {model_paths.ros_overlay}")
     return load_ros_overlay_model(
         model_paths.ros_overlay,
         mesh_directory=model_paths.hydrax.parent / "assets",

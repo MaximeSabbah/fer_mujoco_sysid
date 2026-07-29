@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<!--
+  Simulated FER for identification playback.
+
+  Same description and same ros2_control joint set as the real backend; only
+  the hardware plugin and the effort source differ. The MuJoCo model itself
+  is passed in as `mujoco_model` — the launch generates it from the
+  hash-pinned deployment MJCF (see fer_mujoco_sysid.ros.scene), so the
+  simulated plant is the model this project is identifying, not a second
+  description that could drift from it.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="fer">
+  <xacro:arg name="mujoco_model" default=""/>
+  <xacro:arg name="initial_keyframe" default="home"/>
+  <xacro:arg name="headless" default="true"/>
+  <xacro:arg name="ee_id" default="agimus_franka_hand"/>
+  <xacro:arg name="safety_distance" default="0.03"/>
+
+  <xacro:include filename="$(find agimus_franka_description)/robots/common/agimus_franka_robot.xacro"/>
+
+  <xacro:agimus_franka_robot
+    arm_id="fer"
+    joint_limits="${xacro.load_yaml('$(find agimus_franka_description)/robots/fer/joint_limits.yaml')}"
+    inertials="${xacro.load_yaml('$(find agimus_franka_description)/robots/fer/inertials.yaml')}"
+    kinematics="${xacro.load_yaml('$(find agimus_franka_description)/robots/fer/kinematics.yaml')}"
+    dynamics="${xacro.load_yaml('$(find agimus_franka_description)/robots/fer/dynamics.yaml')}"
+    hand="true"
+    ee_id="$(arg ee_id)"
+    with_sc="false"
+    ros2_control="false"
+    robot_ip=""
+    use_fake_hardware="false"
+    fake_sensor_commands="false"
+    no_prefix="false"
+    arm_prefix=""
+    connected_to="base"
+    use_ft_sensor="false"
+    robot_safety_distance="$(arg safety_distance)"/>
+
+  <ros2_control name="MujocoFerSysidSystem" type="system">
+    <hardware>
+      <plugin>mujoco_ros2_control/MujocoSystemInterface</plugin>
+      <param name="mujoco_model">$(arg mujoco_model)</param>
+      <param name="initial_keyframe">$(arg initial_keyframe)</param>
+      <param name="headless">$(arg headless)</param>
+    </hardware>
+
+    <xacro:macro name="fer_sysid_joint" params="name">
+      <joint name="${name}">
+        <command_interface name="effort"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+    </xacro:macro>
+
+    <xacro:fer_sysid_joint name="fer_joint1"/>
+    <xacro:fer_sysid_joint name="fer_joint2"/>
+    <xacro:fer_sysid_joint name="fer_joint3"/>
+    <xacro:fer_sysid_joint name="fer_joint4"/>
+    <xacro:fer_sysid_joint name="fer_joint5"/>
+    <xacro:fer_sysid_joint name="fer_joint6"/>
+    <xacro:fer_sysid_joint name="fer_joint7"/>
+  </ros2_control>
+</robot>

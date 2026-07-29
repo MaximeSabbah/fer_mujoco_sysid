@@ -219,3 +219,10 @@ __marimo__/
 
 # Review videos are regenerable with ./scripts/identification-demo
 docs/protocol_review/*.mp4
+
+# Recorded data: large and reproducible from the bag it came from. Reports,
+# plots and identified models under output/ are tracked.
+/output/*/*/raw/
+/output/*/*/recording/
+# Videos are regenerated on demand and are too big to carry in git.
+*.mp4

@@ -2,7 +2,7 @@
 
 Defines the canonical friction protocols plus a held-out variant as fixed,
 seeded specs; generates their immutable bundles under ``protocols/`` and the
-human-review material under ``docs/protocol_review/`` (per-joint motion
+human-review material under ``protocols/review/`` (per-joint motion
 plots and a conditioning summary). ``--check`` regenerates every spec into a
 temporary directory and compares content hashes against the committed
 bundles, so generator drift cannot go unnoticed.
@@ -51,7 +51,14 @@ from fer_mujoco_sysid.model import (  # noqa: E402
 
 # Committed campaign timestamp: fixed so regeneration is byte-reproducible.
 CAMPAIGN_CREATED_AT = "2026-07-27T00:00:00Z"
-CAMPAIGN_REVISION = "r1"
+# r2 (2026-07-28): the r1 inertial protocols ended their Fourier segment
+# mid-cycle and stepped back to the home pose in a single 10 ms sample — up to
+# 0.59 rad. Played through the trajectory controller in ROS simulation that
+# saturated four joints and aborted the goal on a path-tolerance violation.
+# The frequencies are now commensurate with the protocol duration and the
+# series lands exactly on home; see InertialProtocolSpec. r1 was never
+# approved and is not kept.
+CAMPAIGN_REVISION = "r2"
 
 # The campaign: two canonical protocols (different seeds, so different
 # per-joint amplitude jitter) and one held-out variant with a different
@@ -85,7 +92,10 @@ INERTIAL_CAMPAIGN: tuple[InertialProtocolSpec, ...] = (
     InertialProtocolSpec(
         protocol_id="fer-inertial-holdout",
         seed=902,
-        base_frequency_hz=(0.11, 0.14, 0.19, 0.23, 0.29, 0.34, 0.41),
+        # Different multiples of the same fundamental as the canonical
+        # protocols, so the holdout excites a different frequency mix while
+        # still returning to rest at home (see InertialProtocolSpec).
+        base_frequency_hz=(0.10, 0.20, 0.30, 0.45, 0.55, 0.65, 0.75),
     ),
 )
 
@@ -288,7 +298,7 @@ def generate_campaign(
 
 def _write_summary(path: Path, rows: list[dict[str, object]]) -> None:
     lines = [
-        "# Friction campaign review summary",
+        "# Campaign review summary",
         "",
         f"Generated deterministically ({CAMPAIGN_CREATED_AT}, revision "
         f"{CAMPAIGN_REVISION}). Conditioning numbers come from simulated "
@@ -374,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if problems else 0
     rows = generate_campaign(
         root / "protocols",
-        root / "docs" / "protocol_review",
+        root / "protocols" / "review",
         conditioning=not arguments.no_conditioning,
     )
     for row in rows:

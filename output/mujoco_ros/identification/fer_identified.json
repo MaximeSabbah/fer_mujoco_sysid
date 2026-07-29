@@ -1,0 +1,45 @@
+{
+  "exported_fields": [
+    "damping",
+    "frictionloss"
+  ],
+  "exported_model": {
+    "path": "/workspace/fer_mujoco_sysid/output/mujoco_ros/identification/fer_identified.xml",
+    "sha256": "02590d075116b90a3c95ef29fed722d8055e0cc8c9bd3f7d7757ea455dfff458"
+  },
+  "format": "fer-mujoco-sysid/identified-model@1",
+  "joints": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+    "joint7"
+  ],
+  "meshdir": "../../../../hydrax/hydrax/models/panda/assets",
+  "parameters": {
+    "damping": [
+      2.0062463528707606,
+      1.8194755953685406,
+      1.5064928898758732,
+      1.9004976984890656,
+      0.8026188192279718,
+      0.6995201963968466,
+      0.5018080049440091
+    ],
+    "frictionloss": [
+      1.3990299433905509,
+      1.1983364666201124,
+      1.0994620235406338,
+      1.499772430598241,
+      0.34966700684528673,
+      1.0999325324276872,
+      0.5498327077819108
+    ]
+  },
+  "source_model": {
+    "path": "/workspace/hydrax/hydrax/models/panda/panda.xml",
+    "sha256": "7e8dfc2155ff5b87a10599b4b27b4aa000058e88fb9585aa803e6cb797f902d9"
+  }
+}

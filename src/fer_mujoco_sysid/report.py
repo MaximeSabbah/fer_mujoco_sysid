@@ -40,11 +40,16 @@ from fer_mujoco_sysid.campaign import (  # noqa: E402
     repository_root,
     tracking_run,
 )
+from fer_mujoco_sysid.dataset import output_root  # noqa: E402
 from fer_mujoco_sysid.diagnostics import (  # noqa: E402
     friction_regressor_report,
     parameter_quality,
     predicted_torque,
     torque_residuals,
+)
+from fer_mujoco_sysid.export import (  # noqa: E402
+    IdentifiedParameters,
+    export_identified_model,
 )
 from fer_mujoco_sysid.fitting import (  # noqa: E402
     MeasuredRun,
@@ -565,6 +570,25 @@ def run_identification(demo_dir: Path, *, reuse_fit: bool = False) -> None:
         demo_dir / "torque_residuals.png", holdout, nominal, identified
     )
 
+    print("exporting the identified model ...")
+    export = export_identified_model(
+        demo_dir / "fer_identified.xml",
+        IdentifiedParameters(
+            frictionloss=tuple(frictionloss), damping=tuple(damping)
+        ),
+        manifest_path=demo_dir / "fer_identified.json",
+    )
+    # The exported file must behave like the model it was exported from, not
+    # merely carry the same numbers. Reload it from disk, project it the same
+    # way the fit projects the nominal model, and check it predicts the
+    # held-out protocol identically.
+    reloaded = build_hydrax_arm_spec(
+        demo_dir / "fer_identified.xml", joint_state_sensors=True
+    ).compile()
+    reloaded_q, reloaded_ee = _windowed_prediction(reloaded, holdout.filtered)
+    export_parity_rad = float(np.max(np.abs(reloaded_q - identified_q)))
+    print(f"  exported model reload parity: {export_parity_rad:.2e} rad")
+
     _write_report(
         demo_dir / "result.md",
         frictionloss=frictionloss,
@@ -581,6 +605,9 @@ def run_identification(demo_dir: Path, *, reuse_fit: bool = False) -> None:
         identified_torque=identified_torque,
         inertial_nominal=inertial_nominal,
         inertial_identified=inertial_identified,
+        export=export,
+        export_parity_rad=export_parity_rad,
+        export_ee_parity_mm=float(abs(reloaded_ee.mean() - identified_ee.mean())),
     )
     print((demo_dir / "result.md").read_text())
 
@@ -695,7 +722,31 @@ def _write_report(path: Path, **data) -> None:
         f"| {data['inertial_nominal'].worst_rmse:.3f} "
         f"| {data['inertial_identified'].worst_rmse:.3f} |",
         "",
-        "## 5. Plots",
+        "## 5. The identified model",
+        "",
+        "`fer_identified.xml` is the nominal model with the identified "
+        "parameters written in, and `fer_identified.json` records both files "
+        "by SHA-256 so a model can always be traced back to the fit that "
+        "produced it. This is the artefact the controllers would consume.",
+        "",
+        data["export"].table(),
+        "",
+        "Two checks run before that file is allowed to exist:",
+        "",
+        "* **Nothing else changed.** Masses, inertias, link poses, joint "
+        "ranges, actuator limits and geometry are compared against the "
+        "nominal model and must be identical. Only friction, damping and "
+        "armature are exportable — a change anywhere else would be a "
+        "different robot, not a better estimate of this one.",
+        "* **The written file behaves like the fitted model.** Writing to XML "
+        "keeps about seven significant digits, so the parameters come back "
+        f"off disk within **{data['export'].roundtrip_error:.1e}** of what "
+        "the fit produced. Reloaded and run open-loop over the held-out "
+        "protocol, the exported model reproduces the in-memory one's per-joint "
+        f"RMSE to **{data['export_parity_rad']:.1e} rad** and its mean gripper "
+        f"error to **{data['export_ee_parity_mm']:.1e} mm**.",
+        "",
+        "## 6. Plots",
         "",
         "* `friction_curves.png` — friction torque vs velocity at the "
         "cruises: truth (thick orange), identified (dashed blue), nominal "
@@ -732,10 +783,10 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     root = repository_root()
     if not arguments.skip_videos:
-        render_protocol_videos(root / "docs" / "protocol_review")
+        render_protocol_videos(root / "protocols" / "review")
     if not arguments.skip_fit:
         run_identification(
-            root / "docs" / "identification_demo", reuse_fit=arguments.reuse_fit
+            output_root(root, "mujoco"), reuse_fit=arguments.reuse_fit
         )
     return 0
 

@@ -1,19 +1,8 @@
-"""FER MuJoCo system-identification tools."""
+"""FER MuJoCo system-identification tools.
 
-from fer_mujoco_sysid.model import (
-    ARM_JOINT_PAIRS,
-    PHYSICAL_BODY_NAMES,
-    ModelPaths,
-    build_hydrax_arm_model,
-    load_ros_overlay_model,
-    resolve_model_paths,
-)
-
-__all__ = [
-    "ARM_JOINT_PAIRS",
-    "PHYSICAL_BODY_NAMES",
-    "ModelPaths",
-    "build_hydrax_arm_model",
-    "load_ros_overlay_model",
-    "resolve_model_paths",
-]
+Deliberately empty of imports. Importing the package must not import MuJoCo,
+because :mod:`fer_mujoco_sysid.protocol` and :mod:`fer_mujoco_sysid.playback`
+run inside ROS processes on the robot, where the ``mujoco`` name may resolve
+to whatever a ROS package happened to put on the path. Import the module you
+need — ``from fer_mujoco_sysid.model import ...`` — not the package.
+"""
