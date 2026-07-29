@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Compatibility name for operators who used the early friction-only demo.
-# There is now one canonical simulation path; all arguments are those of
-# scripts/validate-simulation.
-REPOSITORY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-exec "${REPOSITORY}/scripts/validate-simulation" "$@"
