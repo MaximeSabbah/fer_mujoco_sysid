@@ -50,6 +50,13 @@ TABLE_Z_M = -0.02
 
 SCENE_NAME = "fer_sysid_plant"
 
+#: The FCI closes its loop at 1 kHz and ``controller_manager`` is configured to
+#: match it, so the plant must step at 1 kHz too. The nominal model's 2 ms step
+#: leaves the physics running at half the control rate: ``mujoco_ros2_control``
+#: warns that the simulation is under-sampled, and the controller reads a state
+#: that has not advanced, which shows up as one-cycle jumps in commanded effort.
+PLANT_TIMESTEP_S = 0.001
+
 #: Hydrax joint name -> ROS joint name. ``mujoco_ros2_control`` resolves a
 #: ros2_control joint to the MuJoCo actuator driving the joint of the same
 #: name, so these names are the binding between the two worlds.
@@ -75,7 +82,7 @@ def build_plant_spec(
     rehearsal of anything real.
     """
     model_path = Path(model_path).resolve()
-    spec = build_hydrax_arm_spec(model_path)
+    spec = build_hydrax_arm_spec(model_path, timestep=PLANT_TIMESTEP_S)
     # Asset paths are resolved relative to the source file; the scene is
     # written elsewhere, so make them absolute before it moves.
     spec.meshdir = str((model_path.parent / spec.meshdir).resolve())
