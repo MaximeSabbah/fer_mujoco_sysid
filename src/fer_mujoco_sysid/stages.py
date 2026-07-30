@@ -15,7 +15,7 @@ gate and belongs after fitting.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import mujoco
@@ -30,6 +30,7 @@ from fer_mujoco_sysid.fitting import (
     AcceptanceReport,
     BodyInertialCorrection,
     FitResult,
+    IdentificationAcceptanceError,
     MeasuredRun,
     MultistartResult,
     ObservableSubset,
@@ -41,7 +42,6 @@ from fer_mujoco_sysid.fitting import (
     fit_parameters,
     friction_parameters,
     measurement_sequences,
-    require_acceptable_fit,
     require_observable,
     select_observable_subset,
     set_hinge_damping,
@@ -70,8 +70,16 @@ COUPLING_REFINEMENT_MAX_ROUNDS = 4
 COUPLING_CONVERGENCE_FRACTION = 1e-5
 MAXIMUM_METHOD_DISAGREEMENT_PERCENT = 20.0
 # The classical freeze rule: a viscous coefficient this uncertain is not
-# identified by the cruises and is left at the nominal model value.
+# identified by the data and is left at the nominal model value.
 DAMPING_FREEZE_SIGMA_PERCENT = 20.0
+# A coefficient whose torque contribution at the fastest cruise speed is below
+# this is not worth releasing: it cannot be distinguished from measurement noise
+# (the campaign's own torque agreement is 1.7 mNm), and once the optimizer walks
+# it to its zero bound it carries no sensitivity, which collapses the block's
+# smallest singular value — measured on hardware 2026-07-30 as a conditioning
+# ratio of 2.8e-09 caused by one such coefficient.
+DAMPING_MINIMUM_TORQUE_NM = 0.02
+TOP_CRUISE_SPEED_RAD_S = 0.4
 
 # Every link is offered the same tightly bounded CAD correction vocabulary.
 # The local Jacobian releases only scalar directions supported by the actual
@@ -170,6 +178,9 @@ class StageResult:
     dynamic_frozen_postfit: tuple[str, ...]
     coupling_refinement_rounds: int
     coupling_max_change_fraction: float
+    #: Every gate that fired. Empty means every stage passed its own checks;
+    #: non-empty does not stop the report, it explains it.
+    problems: tuple[str, ...] = ()
 
     def summary(self) -> dict[str, object]:
         dynamic: dict[str, object] | None = None
@@ -214,6 +225,7 @@ class StageResult:
             "friction_refit": _fit_summary(
                 self.friction_refit, self.friction_refit_acceptance
             ),
+            "problems": list(self.problems),
             "sigma_percent": self.quality.relative_percent.tolist(),
             "rejected_parameters": self.quality.rejected,
             "armature_sigma_percent": (
@@ -317,6 +329,8 @@ def unsupported_damping(linear: LinearFrictionFit) -> tuple[bool, ...]:
         bool(
             linear.damping[joint] <= 0.0
             or linear.damping_sigma_percent[joint] > DAMPING_FREEZE_SIGMA_PERCENT
+            or linear.damping[joint] * TOP_CRUISE_SPEED_RAD_S
+            < DAMPING_MINIMUM_TORQUE_NM
         )
         for joint in range(7)
     )
@@ -358,7 +372,11 @@ def _friction_fit(
             f"  {label}: viscous term left at the nominal model value for "
             + ", ".join(frozen)
         )
-    require_observable(parameters, sequences)
+    observability: tuple[str, ...] = ()
+    try:
+        require_observable(parameters, sequences)
+    except IdentificationAcceptanceError as error:
+        observability = (f"{label} pre-fit observability: {error}",)
     result = fit_parameters(parameters, sequences, max_iters=max_iters)
 
     # A viscous term resting on its lower bound of zero is an answer, not a
@@ -381,11 +399,11 @@ def _friction_fit(
     only_zero_damping = bool(zero_damping) and len(zero_damping) == len(
         result.bound_hits
     )
-    acceptance = require_acceptable_fit(
-        result,
-        label=label,
-        reject_bound_hits=not only_zero_damping,
-    )
+    acceptance = fit_acceptance(result, reject_bound_hits=not only_zero_damping)
+    if observability:
+        acceptance = replace(
+            acceptance, problems=acceptance.problems + observability
+        )
     return result, acceptance
 
 
@@ -512,6 +530,11 @@ def fit_stages(
         raise ValueError("max_iters must be positive")
     if dynamic_starts < 1:
         raise ValueError("dynamic_starts must be positive")
+    # Gates report; they do not abort. A rejected fit is exactly when the
+    # operator needs the metrics and plots, so every finding is collected here
+    # and published with the result. Releasing a *model* remains fail-closed on
+    # held-out reproduction, which is decided in identify.run.
+    problems: list[str] = []
     for recording in recordings:
         recording.validate()
 
@@ -558,8 +581,10 @@ def fit_stages(
     if not np.isfinite(linear.condition_number).all() or bool(
         (linear.condition_number > 100.0).any()
     ):
-        raise RuntimeError(
-            "friction protocol is not sufficiently conditioned for release"
+        problems.append(
+            "friction protocol is not sufficiently conditioned for release: "
+            f"worst per-joint regressor condition number "
+            f"{float(np.nanmax(linear.condition_number)):.1f} > 100"
         )
     # The classical 20% rule freezes a parameter it cannot resolve; it does not
     # discard the fit. Applying it as an abort conflated the two: on the first
@@ -577,12 +602,23 @@ def fit_stages(
         if linear.frictionloss_sigma_percent[joint] > 20.0
     ]
     if unresolved_frictionloss:
-        raise RuntimeError(
+        problems.append(
             "classical Coulomb friction is unresolved on "
             + ", ".join(unresolved_frictionloss)
             + "; the friction protocol did not excite these joints"
         )
-    freeze_damping = unsupported_damping(linear)
+    # The Coulomb term is measured on the cruises, where inertial torque
+    # vanishes. The viscous slope needs velocity range the cruises do not have:
+    # over 0.05-0.4 rad/s it came out negative on four joints and above 20%
+    # uncertainty on five, while the same estimator over both families
+    # (0-2 rad/s) returns every coefficient positive and five of seven inside
+    # 18%. So the slope decision — and the slope seed — come from the combined
+    # set, and the Coulomb seed stays with the cruises.
+    wide = (
+        _combined_friction_estimate(nominal, training) if inertial_records else linear
+    )
+    freeze_damping = unsupported_damping(wide)
+    seed_damping = np.where(freeze_damping, linear.damping, wide.damping)
     if any(freeze_damping):
         held = [
             f"joint{joint + 1}" for joint in range(7) if freeze_damping[joint]
@@ -600,7 +636,7 @@ def fit_stages(
         first_spec.compile(),
         friction_runs,
         seed_frictionloss=linear.frictionloss,
-        seed_damping=linear.damping,
+        seed_damping=seed_damping,
         max_iters=max_iters,
         label="first friction fit",
         freeze_damping=freeze_damping,
@@ -668,10 +704,11 @@ def fit_stages(
                 dynamic_frozen_postfit.extend(freeze)
                 active_parameters = _freeze_at_nominal(active_parameters, freeze)
                 if not active_parameters.get_non_frozen_parameter_names():
-                    raise RuntimeError(
+                    problems.append(
                         "dynamic armature/body fit left no precise parameter "
                         "direction after post-fit uncertainty checks"
                     )
+                    break
                 continue
             dynamic_acceptance = fit_acceptance(
                 dynamic_result,
@@ -699,16 +736,14 @@ def fit_stages(
             dynamic_frozen_postfit.append(weakest)
             active_parameters = _freeze_at_nominal(active_parameters, (weakest,))
         else:
-            raise RuntimeError(
+            problems.append(
                 "dynamic armature/body fit did not stabilize after "
                 f"{DYNAMIC_POSTFIT_PASSES} freeze/refit passes"
             )
         assert dynamic_result is not None
         assert dynamic_multistart is not None
-        dynamic_acceptance = require_acceptable_fit(
-            dynamic_result,
-            multistart=dynamic_multistart,
-            label="dynamic armature/body fit",
+        dynamic_acceptance = fit_acceptance(
+            dynamic_result, multistart=dynamic_multistart
         )
         sysid.apply_param_modifiers_spec(dynamic_result.parameters, dynamic_spec)
         changed_bodies = tuple(
@@ -797,10 +832,8 @@ def fit_stages(
                 dynamic_sequences,
                 max_iters=max_iters,
             )
-            dynamic_acceptance = require_acceptable_fit(
-                dynamic_result,
-                multistart=dynamic_multistart,
-                label=f"dynamic coupling refinement {refinement}",
+            dynamic_acceptance = fit_acceptance(
+                dynamic_result, multistart=dynamic_multistart
             )
             sysid.apply_param_modifiers_spec(dynamic_result.parameters, dynamic_spec)
 
@@ -836,7 +869,7 @@ def fit_stages(
             if coupling_max_change_fraction <= COUPLING_CONVERGENCE_FRACTION:
                 break
         else:
-            raise RuntimeError(
+            problems.append(
                 "friction/dynamics alternating refinement did not converge: "
                 f"last maximum parameter change was "
                 f"{coupling_max_change_fraction:.3g} of its bound span"
@@ -859,7 +892,7 @@ def fit_stages(
         )
         armature_quality = _dynamic_quality(dynamic_result)
         if armature_quality is not None and armature_quality.rejected:
-            raise RuntimeError(
+            problems.append(
                 "armature uncertainty rejected " + ", ".join(armature_quality.rejected)
             )
 
@@ -878,7 +911,7 @@ def fit_stages(
     )
     worst_disagreement = float(np.max(np.abs(disagreement)))
     if worst_disagreement > MAXIMUM_METHOD_DISAGREEMENT_PERCENT:
-        raise RuntimeError(
+        problems.append(
             "friction model-class disagreement is "
             f"{worst_disagreement:.1f}% > "
             f"{MAXIMUM_METHOD_DISAGREEMENT_PERCENT:.1f}%; dynamic parameters "
@@ -887,7 +920,7 @@ def fit_stages(
 
     quality = _parameter_quality(refit_result)
     if quality.rejected:
-        raise RuntimeError(
+        problems.append(
             "friction refit uncertainty rejected " + ", ".join(quality.rejected)
         )
 
@@ -905,6 +938,18 @@ def fit_stages(
         include_damping=True,
         include_armature=True,
     )
+    for label, report in (
+        ("first friction fit", first_acceptance),
+        ("dynamic armature/body fit", dynamic_acceptance),
+        ("friction refit", refit_acceptance),
+    ):
+        if report is not None:
+            problems.extend(f"{label}: {problem}" for problem in report.problems)
+    if problems:
+        print("  findings (reported, not fatal):")
+        for problem in problems:
+            print(f"    - {problem}")
+
     return StageResult(
         nominal=nominal,
         classical=classical,
@@ -927,4 +972,5 @@ def fit_stages(
         dynamic_frozen_postfit=tuple(dict.fromkeys(dynamic_frozen_postfit)),
         coupling_refinement_rounds=coupling_refinement_rounds,
         coupling_max_change_fraction=coupling_max_change_fraction,
+        problems=tuple(problems),
     )
