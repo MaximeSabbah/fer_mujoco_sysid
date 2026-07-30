@@ -501,20 +501,29 @@ def _maximum_parameter_change_fraction(
     previous: sysid.ParameterDict,
     current: sysid.ParameterDict,
 ) -> float:
-    """Maximum coordinate change normalized by its declared box span."""
-    previous_names = tuple(previous.get_non_frozen_parameter_names())
-    current_names = tuple(current.get_non_frozen_parameter_names())
-    if previous_names != current_names:
-        raise ValueError("cannot compare parameter blocks with different active fields")
-    if not current_names:
-        return 0.0
-    lower, upper = current.get_bounds()
-    span = upper - lower
-    if np.any(span <= 0.0):
-        raise ValueError("active parameter bounds must have positive span")
-    return float(
-        np.max(np.abs(current.as_vector() - previous.as_vector()) / span)
-    )
+    """Maximum coordinate change normalized by its declared box span.
+
+    Only coordinates active in *both* blocks are compared. Two solves can
+    legitimately disagree about which coefficients are supported — a viscous
+    slope a narrow velocity range cannot resolve may be released once wider
+    data is in scope — and a convergence measure is not the place to litigate
+    that. Raising on the mismatch cost a forty-minute run at the last round of
+    the alternation, after every parameter had already been fitted.
+    """
+    shared_previous = set(previous.get_non_frozen_parameter_names())
+    fractions = [0.0]
+    for name in current.get_non_frozen_parameter_names():
+        if name not in shared_previous:
+            continue
+        lower, upper = current[name].get_bounds()
+        span = np.asarray(upper, dtype=float) - np.asarray(lower, dtype=float)
+        change = np.abs(current[name].as_vector() - previous[name].as_vector())
+        # A pinned coordinate (empty box) cannot move; it contributes nothing
+        # rather than dividing by zero.
+        movable = span > 0.0
+        if np.any(movable):
+            fractions.append(float(np.max(change[movable] / span[movable])))
+    return max(fractions)
 
 
 def fit_stages(
@@ -838,15 +847,20 @@ def fit_stages(
             sysid.apply_param_modifiers_spec(dynamic_result.parameters, dynamic_spec)
 
             dynamic_model = dynamic_spec.compile()
+            # The same problem the refit above solved: both families, and the
+            # freeze decided over their combined velocity range. Refining a
+            # *narrower* friction problem than the one whose result it replaces
+            # is not a fixed-point iteration, it is two different fits taking
+            # turns to overwrite each other.
             refit_result, refit_acceptance = _friction_fit(
                 dynamic_spec,
                 dynamic_model,
-                friction_runs,
+                refit_runs,
                 seed_frictionloss=frictionloss,
                 seed_damping=damping,
                 max_iters=max_iters,
                 label=f"friction coupling refinement {refinement}",
-                freeze_damping=freeze_damping,
+                freeze_damping=refit_damping_freeze,
             )
             frictionloss, damping = _result_joint_columns(refit_result)
             _apply_joint_values(

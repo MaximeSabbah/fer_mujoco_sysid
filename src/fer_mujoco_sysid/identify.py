@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import tempfile
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 import mujoco
@@ -29,7 +30,7 @@ from fer_mujoco_sysid.export import (
     ExportCheck,
     export_consumer_model,
 )
-from fer_mujoco_sysid.io import read_json, write_json
+from fer_mujoco_sysid.io import read_json, sha256_file, write_json
 from fer_mujoco_sysid.model import resolve_model_paths
 from fer_mujoco_sysid.preparation import (
     PreparedRecording,
@@ -70,6 +71,107 @@ RESULT_FORMAT = "fer-mujoco-sysid/identification-result@3"
 STATUS_FORMAT = "fer-mujoco-sysid/identification-status@1"
 STATUS_FILENAME = "identification_status.json"
 CONSUMER_ARTIFACTS = ("fer_identified.xml", "fer_identified.json")
+
+# The fit is the expensive half of a run — tens of minutes of nonlinear solves
+# — while everything downstream of it (held-out evaluation, plots, videos, the
+# report) is minutes. Twice now a defect in that cheap half has thrown away a
+# completed fit, so the fit is checkpointed the moment it returns and reused
+# whenever the same recordings, the same knobs and the same fitting code would
+# reproduce it. It is a cache, never an input: any doubt about the key discards
+# it and refits.
+FIT_CHECKPOINT_FILENAME = "fit_checkpoint.pickle"
+FIT_CHECKPOINT_FORMAT = "fer-mujoco-sysid/fit-checkpoint@1"
+#: Sources whose content decides the fit. A change to any of them invalidates
+#: every checkpoint, which is why the list must stay honest.
+FIT_CODE_SOURCES = (
+    "stages.py",
+    "fitting.py",
+    "classical.py",
+    "selection.py",
+    "preparation.py",
+    "preprocessing.py",
+)
+
+
+def _fit_checkpoint_key(
+    prepared: list[PreparedRecording],
+    *,
+    max_iters: int,
+    dynamic_starts: int,
+    body_corrections: tuple[BodyInertialCorrection, ...],
+) -> str:
+    """Identity of a fit: its data, its knobs, and the code that produces it."""
+    import dataclasses
+    import hashlib
+    import json
+
+    module_dir = Path(__file__).parent
+    identity = {
+        "format": FIT_CHECKPOINT_FORMAT,
+        "recordings": sorted(
+            (record.protocol_id, record.content_sha256, record.role)
+            for record in prepared
+        ),
+        "source_model_sha256": prepared[0].source_model_sha256,
+        "max_iters": max_iters,
+        "dynamic_starts": dynamic_starts,
+        "body_corrections": [
+            dataclasses.asdict(correction) for correction in body_corrections
+        ],
+        "code": {
+            name: sha256_file(module_dir / name)
+            for name in FIT_CODE_SOURCES
+            if (module_dir / name).is_file()
+        },
+    }
+    canonical = json.dumps(identity, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _save_fit_checkpoint(path: Path, stages: StageResult, *, key: str) -> None:
+    """Store a completed fit. Failing to cache is never worth failing a run."""
+    import pickle
+
+    try:
+        staging = path.with_name(path.name + ".partial")
+        with staging.open("wb") as handle:
+            pickle.dump(
+                {"format": FIT_CHECKPOINT_FORMAT, "key": key, "stages": stages},
+                handle,
+                protocol=pickle.HIGHEST_PROTOCOL,
+            )
+        os.replace(staging, path)
+        size_mb = path.stat().st_size / 1e6
+        print(f"  fit checkpointed to {path} ({size_mb:.0f} MB)")
+    except Exception as error:  # noqa: BLE001 - a cache miss must not end a run
+        print(f"  could not checkpoint the fit: {type(error).__name__}: {error}")
+
+
+def _load_fit_checkpoint(path: Path, *, key: str) -> StageResult | None:
+    """Return a previously checkpointed fit, or None with the reason printed."""
+    import pickle
+
+    if not path.is_file():
+        return None
+    try:
+        payload = pickle.loads(path.read_bytes())
+        if payload.get("format") != FIT_CHECKPOINT_FORMAT:
+            print(f"  ignoring {path.name}: unknown checkpoint format")
+            return None
+        if payload.get("key") != key:
+            print(
+                f"  ignoring {path.name}: recordings, knobs or fitting code "
+                "changed since it was written"
+            )
+            return None
+        stages = payload["stages"]
+        if not isinstance(stages, StageResult):
+            print(f"  ignoring {path.name}: does not contain a fit")
+            return None
+    except Exception as error:  # noqa: BLE001 - an unreadable cache is a miss
+        print(f"  ignoring {path.name}: {type(error).__name__}: {error}")
+        return None
+    return stages
 
 
 def _serializable_horizons(
@@ -185,6 +287,47 @@ def _recording_summary(recording: PreparedRecording) -> dict[str, object]:
     }
 
 
+class MediaRenderingIncomplete(RuntimeError):
+    """Some artifacts could not be drawn. The ones that could are on disk.
+
+    Carries both halves so a run can record exactly what it produced and
+    exactly what it could not, rather than discarding the successful figures
+    along with the failed one.
+    """
+
+    def __init__(self, written: list[str], failures: list[str]) -> None:
+        super().__init__(
+            f"{len(failures)} artifact(s) could not be rendered: "
+            + "; ".join(failures)
+        )
+        self.written = tuple(written)
+        self.failures = tuple(failures)
+
+
+def _json_ready(value: object) -> object:
+    """Replace non-finite floats with JSON null, recursively.
+
+    A relative uncertainty is ``sigma / |coefficient|``, so a coefficient the
+    data pin at exactly zero has an *undefined* relative uncertainty, not an
+    infinite one — and JSON cannot spell either. Simulated campaigns never
+    reached this branch: their measurements were generated by the model class
+    being fitted, so every coefficient had a positive true value and stayed
+    interior. Real measurements are not in the model class, drive coefficients
+    onto their bounds, and the strict encoder then refused the finished report.
+    Null is the honest encoding of undefined, and no completed fit should be
+    lost to its own diagnostics.
+    """
+    if isinstance(value, Mapping):
+        return {key: _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    if isinstance(value, np.floating) and not np.isfinite(value):
+        return None
+    return value
+
+
 def _write_attempt_status(
     output_dir: Path,
     *,
@@ -229,24 +372,35 @@ def _archive_previous_consumer(output_dir: Path, *, run_id: str) -> list[str]:
     return archived
 
 
-def _publish_staged_attempt(
-    staging_dir: Path,
-    output_dir: Path,
-    *,
-    run_id: str,
-) -> list[str]:
-    """Atomically replace each generated file after the attempt is complete.
+#: Everything a run regenerates, removed before it starts writing so the
+#: directory never mixes two runs. The fit checkpoint, the status file, the
+#: superseded-model archive and anything a human put here are not touched.
+_GENERATED_ARTIFACTS = ("identification.json", "result.md")
+_GENERATED_PATTERNS = ("*.png", "*.mp4")
 
-    The final status file is deliberately not part of this operation. The
-    caller writes it only after every staged file has reached its final path.
-    """
-    archived = _archive_previous_consumer(output_dir, run_id=run_id)
-    for source in sorted(path for path in staging_dir.rglob("*") if path.is_file()):
-        relative = source.relative_to(staging_dir)
-        destination = output_dir / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, destination)
-    return archived
+
+def _clear_generated_artifacts(output_dir: Path) -> list[str]:
+    """Remove the previous run's artifacts, keeping the reusable fit and media
+    directories out of the way of a partial overwrite."""
+    import shutil
+
+    removed: list[str] = []
+    for name in _GENERATED_ARTIFACTS:
+        path = output_dir / name
+        if path.is_file():
+            path.unlink()
+            removed.append(name)
+    for pattern in _GENERATED_PATTERNS:
+        for path in sorted(output_dir.glob(pattern)):
+            path.unlink()
+            removed.append(path.name)
+    media = output_dir / "media"
+    if media.is_dir():
+        shutil.rmtree(media)
+        removed.append("media/")
+    if removed:
+        print(f"  cleared {len(removed)} artifact(s) from the previous run")
+    return removed
 
 
 def _rewrite_staged_consumer_manifest(
@@ -275,30 +429,52 @@ def _render_outputs(
     stages: StageResult,
     evaluations: dict[str, dict[str, object]],
 ) -> list[str]:
-    """Write the expected videos and metric plots, returning relative paths."""
+    """Write the expected videos and metric plots, returning relative paths.
+
+    Each artifact is attempted independently: one figure that cannot be drawn
+    costs that figure, not the other twenty-four and not the run.
+    """
     from fer_mujoco_sysid import identify_plots
 
     written: list[str] = []
+    failures: list[str] = []
+
+    def attempt(label: str, render):
+        """Run one renderer, recording rather than propagating its failure."""
+        try:
+            written.append(_relative_media_path(render(), output_dir))
+        except Exception as error:  # noqa: BLE001 - one artifact, not the run
+            failures.append(f"{label}: {type(error).__name__}: {error}")
+            print(f"  could not render {label}: {type(error).__name__}: {error}")
+
     for recording in prepared:
         _, raw = load_recording(recording.root)
         desired = raw.get("q_desired_rad")
         recording_dir = output_dir / "media" / recording.protocol_id
-        video = identify_plots.render_recording_replay(
-            recording_dir / "replay.mp4",
-            model_path,
-            raw["q_rad"],
-            raw["time_s"],
-            q_desired_rad=desired,
+        attempt(
+            f"{recording.protocol_id} replay",
+            lambda recording_dir=recording_dir, raw=raw, desired=desired: (
+                identify_plots.render_recording_replay(
+                    recording_dir / "replay.mp4",
+                    model_path,
+                    raw["q_rad"],
+                    raw["time_s"],
+                    q_desired_rad=desired,
+                )
+            ),
         )
-        written.append(_relative_media_path(video, output_dir))
         if desired is not None:
-            tracking = identify_plots.plot_tracking(
-                recording_dir / "tracking.png",
-                raw["time_s"],
-                raw["q_rad"],
-                desired,
+            attempt(
+                f"{recording.protocol_id} tracking",
+                lambda recording_dir=recording_dir, raw=raw, desired=desired: (
+                    identify_plots.plot_tracking(
+                        recording_dir / "tracking.png",
+                        raw["time_s"],
+                        raw["q_rad"],
+                        desired,
+                    )
+                ),
             )
-            written.append(_relative_media_path(tracking, output_dir))
 
     candidates = {
         "nominal": stages.nominal,
@@ -310,48 +486,70 @@ def _render_outputs(
         run = recording.protocol_run()
         ddq = recording.protocol_acceleration()
         evaluation = evaluations[recording.protocol_id]
-        paths = (
-            identify_plots.plot_rollout_vs_measurement(
-                output_dir / f"rollout_vs_measurement_{tag}.png",
-                candidates,
-                run,
+        for label, render in (
+            (
+                "rollout_vs_measurement",
+                lambda tag=tag, run=run: identify_plots.plot_rollout_vs_measurement(
+                    output_dir / f"rollout_vs_measurement_{tag}.png",
+                    candidates,
+                    run,
+                ),
             ),
-            identify_plots.plot_error_vs_horizon(
-                output_dir / f"error_vs_horizon_{tag}.png",
-                evaluation["horizons"],
+            (
+                "error_vs_horizon",
+                lambda tag=tag, evaluation=evaluation: (
+                    identify_plots.plot_error_vs_horizon(
+                        output_dir / f"error_vs_horizon_{tag}.png",
+                        evaluation["horizons"],
+                    )
+                ),
             ),
-            identify_plots.plot_end_effector(
-                output_dir / f"end_effector_{tag}.png",
-                candidates,
-                run,
+            (
+                "end_effector",
+                lambda tag=tag, run=run: identify_plots.plot_end_effector(
+                    output_dir / f"end_effector_{tag}.png",
+                    candidates,
+                    run,
+                ),
             ),
-            identify_plots.plot_torque_tracking(
-                output_dir / f"torque_tracking_{tag}.png",
-                candidates,
-                run,
-                ddq,
-                recording.protocol_classical_torque(),
-                torque_label=recording.control_channel,
+            (
+                "torque_tracking",
+                lambda tag=tag, recording=recording, ddq=ddq, run=run: (
+                    identify_plots.plot_torque_tracking(
+                        output_dir / f"torque_tracking_{tag}.png",
+                        candidates,
+                        run,
+                        ddq,
+                        recording.protocol_classical_torque(),
+                        torque_label=recording.control_channel,
+                    )
+                ),
             ),
-        )
-        written.extend(_relative_media_path(path, output_dir) for path in paths)
+        ):
+            attempt(f"{recording.protocol_id} {label}", render)
 
         if recording.family == FRICTION_FAMILY:
             mask = recording.stage.classical_mask
-            friction = identify_plots.plot_friction_curves(
-                output_dir / "friction_curves.png",
-                stages.nominal,
-                stages.linear,
-                (
-                    np.asarray(stages.parameters.frictionloss),
-                    np.asarray(stages.parameters.damping),
+            attempt(
+                "friction curves",
+                lambda mask=mask, recording=recording: (
+                    identify_plots.plot_friction_curves(
+                        output_dir / "friction_curves.png",
+                        stages.nominal,
+                        stages.linear,
+                        (
+                            np.asarray(stages.parameters.frictionloss),
+                            np.asarray(stages.parameters.damping),
+                        ),
+                        recording.run.measured[mask, :7],
+                        recording.run.measured[mask, 7:14],
+                        recording.ddq_rad_s2[mask],
+                        recording.stage.classical_torque_Nm[mask],
+                    )
                 ),
-                recording.run.measured[mask, :7],
-                recording.run.measured[mask, 7:14],
-                recording.ddq_rad_s2[mask],
-                recording.stage.classical_torque_Nm[mask],
             )
-            written.append(_relative_media_path(friction, output_dir))
+    if failures:
+        raise MediaRenderingIncomplete(written, failures)
     return written
 
 
@@ -365,6 +563,7 @@ def _run_attempt(
     body_corrections: tuple[BodyInertialCorrection, ...] = DEFAULT_BODY_CORRECTIONS,
     acceptance_thresholds: AcceptanceThresholds | None = None,
     render_media: bool = True,
+    reuse_fit: bool = True,
 ) -> tuple[dict[str, object], ReproductionAcceptance]:
     """Build one complete attempt in staging, then publish its files."""
     recordings_root = Path(recordings_root)
@@ -401,14 +600,31 @@ def _run_attempt(
         f"  holdouts: {[r.protocol_id for r in holdouts]}"
     )
 
-    print("fitting friction, observable dynamic corrections, then friction ...")
-    stages = fit_stages(
-        model_path,
-        [record.stage for record in prepared],
+    checkpoint_path = output_dir / FIT_CHECKPOINT_FILENAME
+    checkpoint_key = _fit_checkpoint_key(
+        prepared,
         max_iters=max_iters,
         dynamic_starts=dynamic_starts,
         body_corrections=body_corrections,
     )
+    stages = (
+        _load_fit_checkpoint(checkpoint_path, key=checkpoint_key) if reuse_fit else None
+    )
+    if stages is None:
+        print("fitting friction, observable dynamic corrections, then friction ...")
+        stages = fit_stages(
+            model_path,
+            [record.stage for record in prepared],
+            max_iters=max_iters,
+            dynamic_starts=dynamic_starts,
+            body_corrections=body_corrections,
+        )
+        _save_fit_checkpoint(checkpoint_path, stages, key=checkpoint_key)
+    else:
+        print(
+            f"reusing the fit checkpointed in {checkpoint_path.name}: same "
+            "recordings, same knobs, same fitting code"
+        )
     candidates = {
         "nominal": stages.nominal,
         "classical": stages.classical,
@@ -433,11 +649,23 @@ def _run_attempt(
     )
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    prefix = f".{output_dir.name}-staging-"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _clear_generated_artifacts(output_dir)
+    # A previous run's model is retired the moment a new attempt starts. Whatever
+    # happens from here, this directory never holds a delivered model that its
+    # own report does not describe.
+    _archive_previous_consumer(output_dir, run_id=run_id)
+    prefix = f".{output_dir.name}-export-"
     with tempfile.TemporaryDirectory(prefix=prefix, dir=output_dir.parent) as temporary:
-        staging_dir = Path(temporary)
-        exported_model = staging_dir / CONSUMER_ARTIFACTS[0]
-        exported_manifest = staging_dir / CONSUMER_ARTIFACTS[1]
+        # Only the consumer model is staged. Every diagnostic is written straight
+        # into the output directory as it is produced, so a later failure leaves
+        # the evidence in place instead of deleting it: metrics and plots are
+        # most wanted exactly when a run did not finish. Releasing a *model*
+        # still requires passing the held-out gate, which is why these two files
+        # alone wait in a temporary directory until everything else is on disk.
+        export_dir = Path(temporary)
+        exported_model = export_dir / CONSUMER_ARTIFACTS[0]
+        exported_manifest = export_dir / CONSUMER_ARTIFACTS[1]
         export: ConsumerModelExportCheck | None = None
         export_parity: dict[str, float] | None = None
 
@@ -522,11 +750,16 @@ def _run_attempt(
             "media": [],
         }
 
+        # Metrics first, before anything that renders. Whatever happens next,
+        # the numbers are already readable on disk.
+        write_json(output_dir / "identification.json", _json_ready(summary))
+
+        media_error: Exception | None = None
         if render_media:
             print("rendering recording videos and per-family metric plots ...")
             try:
                 summary["media"] = _render_outputs(
-                    staging_dir,
+                    output_dir,
                     model_path,
                     prepared,
                     holdouts,
@@ -534,24 +767,51 @@ def _run_attempt(
                     evaluations,
                 )
             except Exception as error:
-                if acceptance.accepted:
-                    # A nominally accepted fit is not deliverable without the
-                    # requested evidence. Its staged XML is discarded.
-                    raise
+                # Whatever was drawn before the failure is already on disk, so
+                # it is recorded as produced rather than forgotten.
+                if isinstance(error, MediaRenderingIncomplete):
+                    summary["media"] = list(error.written)
                 summary["media_generation_error"] = {
                     "type": type(error).__name__,
                     "message": str(error),
+                    "failures": list(getattr(error, "failures", ())),
                 }
+                media_error = error
+                print(f"  media generation incomplete: {error}")
 
-        write_json(staging_dir / "identification.json", summary)
-        _write_report(
-            staging_dir / "result.md",
-            summary,
-            stages,
-            export,
-            acceptance,
-        )
-        _publish_staged_attempt(staging_dir, output_dir, run_id=run_id)
+        write_json(output_dir / "identification.json", _json_ready(summary))
+        try:
+            _write_report(
+                output_dir / "result.md",
+                summary,
+                stages,
+                export,
+                acceptance,
+            )
+        except Exception as error:
+            # The report is a rendering of identification.json, which is already
+            # written. Losing the prose must not lose the run.
+            import traceback
+
+            print(f"  report generation failed: {type(error).__name__}: {error}")
+            (output_dir / "result.md").write_text(
+                "# Identification report generation failed\n\n"
+                f"Run `{run_id}` produced its metrics and media, but rendering "
+                "this report raised:\n\n```\n"
+                f"{traceback.format_exc()}```\n\n"
+                "Every number is in `identification.json`, and the plots and "
+                "videos in this directory are complete.\n",
+                encoding="utf-8",
+            )
+
+        if acceptance.accepted:
+            if media_error is not None:
+                # A nominally accepted fit is not deliverable without the
+                # requested evidence, so the verified model is not released.
+                # Everything else stays on disk to show why.
+                raise media_error
+            for name in CONSUMER_ARTIFACTS:
+                os.replace(export_dir / name, output_dir / name)
     return summary, acceptance
 
 
@@ -564,6 +824,7 @@ def run(
     body_corrections: tuple[BodyInertialCorrection, ...] = DEFAULT_BODY_CORRECTIONS,
     acceptance_thresholds: AcceptanceThresholds | None = None,
     render_media: bool = True,
+    reuse_fit: bool = True,
 ) -> dict[str, object]:
     """Fit a campaign and publish one unambiguous accepted or rejected result."""
     output_dir = Path(output_dir)
@@ -580,6 +841,7 @@ def run(
             body_corrections=body_corrections,
             acceptance_thresholds=acceptance_thresholds,
             render_media=render_media,
+            reuse_fit=reuse_fit,
         )
         _write_attempt_status(
             output_dir,
@@ -620,6 +882,23 @@ def _write_report(
         "",
         f"Fitted on {', '.join(summary['train'])}; "
         f"held out {', '.join(summary['holdout'])}.",
+        "",
+        "## Findings",
+        "",
+        "Every check that fired, in fitting order. A finding explains a number "
+        "in this report; it does not withhold one. Only the held-out release "
+        "gate below decides whether the consumer model ships.",
+        "",
+    ]
+    findings = list(stages.problems) + [
+        f"held-out release gate: {problem}" for problem in acceptance.problems
+    ]
+    if findings:
+        lines += [f"- {finding}" for finding in findings]
+    else:
+        lines.append("None: every stage passed its own checks.")
+
+    lines += [
         "",
         "## Recording and lineage",
         "",
@@ -839,6 +1118,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip videos/plots for a diagnostic run; normal deliverables include them",
     )
+    parser.add_argument(
+        "--refit",
+        action="store_true",
+        help=(
+            "ignore any checkpointed fit for these recordings and solve again; "
+            "by default a fit is reused when the data, knobs and fitting code "
+            "are unchanged"
+        ),
+    )
     arguments = parser.parse_args(argv)
 
     recordings = Path(
@@ -856,6 +1144,7 @@ def main(argv: list[str] | None = None) -> int:
             max_iters=arguments.max_iters,
             dynamic_starts=arguments.dynamic_starts,
             render_media=not arguments.no_media,
+            reuse_fit=not arguments.refit,
         )
     except RuntimeError:
         status_path = output / STATUS_FILENAME

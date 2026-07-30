@@ -431,9 +431,16 @@ def test_accepted_consumer_is_published_only_after_media(
     assert status["consumer_model_current"] is True
 
 
-def test_accepted_fit_with_failed_media_does_not_publish_consumer(
+def test_failed_media_keeps_every_metric_but_releases_no_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A failure withholds the model, never the evidence.
+
+    Artifacts are written into the output directory as they are produced, so a
+    run that dies late leaves its metrics and whatever it managed to render in
+    place — those are wanted most when something went wrong. Releasing a model
+    still requires the full evidence, so the verified export is discarded.
+    """
     _mock_identification_attempt(
         monkeypatch,
         tmp_path,
@@ -447,7 +454,9 @@ def test_accepted_fit_with_failed_media_does_not_publish_consumer(
 
     assert not (output / "fer_identified.xml").exists()
     assert not (output / "fer_identified.json").exists()
-    assert not (output / "identification.json").exists()
+    result = json.loads((output / "identification.json").read_text())
+    assert result["media_generation_error"]["message"] == "renderer unavailable"
+    assert (output / "result.md").is_file()
     status = json.loads((output / identify.STATUS_FILENAME).read_text())
     assert status["state"] == "failed"
     assert status["consumer_model_current"] is False
@@ -488,6 +497,57 @@ def test_rejected_fit_keeps_diagnostics_and_retires_stale_consumer(
     assert status["consumer_model_current"] is False
 
 
+def test_clearing_a_previous_run_spares_the_checkpoint_and_human_files(
+    tmp_path: Path,
+) -> None:
+    """Artifacts are written in place, so the previous run's are cleared first.
+
+    Deleting the fit checkpoint would defeat its purpose — the next run would
+    resolve tens of minutes of solves again — and nothing a person put here is
+    the pipeline's to remove.
+    """
+    output = tmp_path / "identification"
+    output.mkdir()
+    for name in (
+        "identification.json",
+        "result.md",
+        "rollout_vs_measurement_x.png",
+        "replay.mp4",
+    ):
+        (output / name).write_text("stale", encoding="utf-8")
+    (output / "media" / "fer-friction-a").mkdir(parents=True)
+    (output / "media" / "fer-friction-a" / "replay.mp4").write_text("stale")
+    (output / identify.FIT_CHECKPOINT_FILENAME).write_text("fit", encoding="utf-8")
+    (output / identify.STATUS_FILENAME).write_text("{}", encoding="utf-8")
+    (output / "user-notes.txt").write_text("keep me", encoding="utf-8")
+    archive = output / "previous_consumer_models" / "superseded-by-abc"
+    archive.mkdir(parents=True)
+    (archive / "fer_identified.xml").write_text("old model", encoding="utf-8")
+
+    identify._clear_generated_artifacts(output)
+
+    assert not (output / "identification.json").exists()
+    assert not (output / "result.md").exists()
+    assert not (output / "rollout_vs_measurement_x.png").exists()
+    assert not (output / "media").exists()
+    assert (output / identify.FIT_CHECKPOINT_FILENAME).read_text() == "fit"
+    assert (output / identify.STATUS_FILENAME).is_file()
+    assert (output / "user-notes.txt").read_text() == "keep me"
+    assert (archive / "fer_identified.xml").read_text() == "old model"
+
+
+def test_incomplete_media_reports_what_was_drawn_and_what_failed() -> None:
+    """Both halves travel with the failure, so neither is lost."""
+    error = identify.MediaRenderingIncomplete(
+        ["rollout_vs_measurement_a.png"],
+        ["friction curves: ValueError: empty mask"],
+    )
+
+    assert error.written == ("rollout_vs_measurement_a.png",)
+    assert error.failures == ("friction curves: ValueError: empty mask",)
+    assert "1 artifact(s) could not be rendered" in str(error)
+
+
 def test_report_distinguishes_fit_and_consumer_gravity_conventions(
     tmp_path: Path,
 ) -> None:
@@ -507,6 +567,7 @@ def test_report_distinguishes_fit_and_consumer_gravity_conventions(
             frictionloss=(0.1,) * 7,
             damping=(0.2,) * 7,
         ),
+        problems=(),
     )
     acceptance = identify.ReproductionAcceptance(True, (), {})
     summary = {
@@ -526,3 +587,73 @@ def test_report_distinguishes_fit_and_consumer_gravity_conventions(
     assert "gravity-enabled full Panda consumer model" in text
     assert "Hydrax/MPPI" in text
     assert "final LFC adapter subtracts the gravity contribution" in text
+    assert "None: every stage passed its own checks." in text
+
+
+def test_report_lists_every_finding_that_fired(tmp_path: Path) -> None:
+    """Findings are reported, so they have to appear in the deliverable.
+
+    A gate that fires no longer withholds the metrics, which is only useful if
+    the reader is told which gates fired and where.
+    """
+    stages = SimpleNamespace(
+        linear=SimpleNamespace(
+            covariance_method="Newey-West",
+            covariance_lags=10,
+            table=lambda: "| friction |",
+        ),
+        first_friction=SimpleNamespace(objective_reduction=0.5),
+        dynamic=None,
+        friction_refit=SimpleNamespace(objective_reduction=0.6),
+        method_disagreement_percent=1.0,
+        coupling_refinement_rounds=2,
+        coupling_max_change_fraction=1e-6,
+        parameters=SimpleNamespace(frictionloss=(0.1,) * 7, damping=(0.2,) * 7),
+        problems=("armature uncertainty rejected joint7_armature",),
+    )
+    acceptance = identify.ReproductionAcceptance(
+        False, ("gripper RMSE 41.2 mm exceeds 25.0 mm",), {}
+    )
+    summary = {
+        "recordings": [],
+        "train": ["friction-train"],
+        "holdout": ["friction-holdout"],
+        "held_out": {},
+        "exported_model": None,
+    }
+    report = tmp_path / "result.md"
+
+    identify._write_report(report, summary, stages, None, acceptance)
+
+    text = report.read_text()
+    assert "## Findings" in text
+    assert "- armature uncertainty rejected joint7_armature" in text
+    assert "- held-out release gate: gripper RMSE 41.2 mm exceeds 25.0 mm" in text
+
+
+def test_undefined_relative_uncertainty_survives_serialization() -> None:
+    """A coefficient pinned at zero has undefined relative uncertainty.
+
+    Real measurements push viscous coefficients onto their lower bound, which
+    makes ``sigma / |value|`` non-finite. Simulated campaigns never did: their
+    data came from the model class being fitted, so every coefficient had a
+    positive true value. The strict JSON encoder refused the finished report,
+    losing a completed fit to its own diagnostics.
+    """
+    summary = {
+        "stages": {"sigma_percent": [1.5, float("inf"), float("nan"), 3.0]},
+        "acceptance": {"score": -float("inf")},
+        "run_id": "abc",
+        "horizons": ({"gripper_rmse_mm": 4.0},),
+    }
+
+    ready = identify._json_ready(summary)
+
+    assert ready == {
+        "stages": {"sigma_percent": [1.5, None, None, 3.0]},
+        "acceptance": {"score": None},
+        "run_id": "abc",
+        "horizons": [{"gripper_rmse_mm": 4.0}],
+    }
+    # The whole point: it now serializes under the project's strict encoder.
+    json.dumps(ready, allow_nan=False)

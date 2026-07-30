@@ -71,6 +71,37 @@ watched opt-in. Identification of real data is fail-closed on the torque
 channel until its limiter and gravity composition are established from
 recorded telemetry.
 
+### What a run leaves behind
+
+Artifacts are written into the output directory **as they are produced** —
+metrics first, then each plot and video, then the report — so a run that fails
+late still leaves everything it obtained, and a partial directory is readable
+while the rest is still being made. The previous run's artifacts are cleared
+when a new one starts; the fit checkpoint, the superseded-model archive and any
+file you put there yourself are kept.
+
+Only `fer_identified.xml`/`.json` are withheld until the end: releasing a model
+requires passing the held-out gate *and* producing the full evidence, so a
+rejected or incomplete run publishes diagnostics but never a model.
+
+### Fitting takes tens of minutes, so it is cached
+
+`identify` writes `fit_checkpoint.pickle` into its output directory as soon as
+the solves finish, and any later run reuses it — the report, plots and videos
+are then rebuilt in seconds. The checkpoint is keyed on the recording digests,
+the source model, the fit knobs and the contents of every source file that
+decides a fit, so it is discarded automatically (with the reason printed) when
+any of those change. `--refit` forces a fresh solve.
+
+Before spending a full fit on new data, prove the whole path in minutes:
+
+```bash
+./scripts/identify <campaign> --output /tmp/smoke --max-iters 1 --dynamic-starts 1
+```
+
+The fit is meaningless at one iteration, but every downstream step — held-out
+evaluation, media, report, publish — runs exactly as it will on the real thing.
+
 ## The six protocols
 
 | Protocol | Family | Role | Identifies |
