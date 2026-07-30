@@ -13,6 +13,7 @@
   <xacro:arg name="mujoco_model" default=""/>
   <xacro:arg name="initial_keyframe" default="home"/>
   <xacro:arg name="headless" default="true"/>
+  <xacro:arg name="sim_speed_factor" default="0.5"/>
   <xacro:arg name="ee_id" default="agimus_franka_hand"/>
   <xacro:arg name="safety_distance" default="0.03"/>
 
@@ -43,6 +44,13 @@
       <param name="mujoco_model">$(arg mujoco_model)</param>
       <param name="initial_keyframe">$(arg initial_keyframe)</param>
       <param name="headless">$(arg headless)</param>
+      <!-- The plant steps at 1 kHz to match the FCI, and controller_manager
+           runs at 1 kHz against it. This machine cannot carry both in real
+           time: at 100% speed roughly 8% of control cycles were dropped and
+           every recording was rejected as gapped. Pacing the simulation
+           clock slower keeps physics and control locked at 1 kHz and costs
+           only wall-clock time, which no recorded quantity depends on. -->
+      <param name="sim_speed_factor">$(arg sim_speed_factor)</param>
     </hardware>
 
     <xacro:macro name="fer_sysid_joint" params="name">
