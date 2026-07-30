@@ -18,7 +18,7 @@ from fer_mujoco_sysid.excitation import _HOME_QPOS
 from fer_mujoco_sysid.export import BodyInertial, IdentifiedParameters
 from fer_mujoco_sysid.model import ModelPaths
 from fer_mujoco_sysid.protocol import ROS_ARM_JOINT_NAMES
-from fer_mujoco_sysid.ros.scene import TABLE_Z_M, write_scene
+from fer_mujoco_sysid.ros.scene import PLANT_TIMESTEP_S, TABLE_Z_M, write_scene
 from fer_mujoco_sysid.stages import fitting_spec
 
 
@@ -53,7 +53,11 @@ def test_plant_is_the_fitting_projection_and_nothing_else(
     assert wrapped.njnt == source.njnt
     assert wrapped.nu == source.nu
     assert wrapped.nbody == source.nbody
-    assert wrapped.opt.timestep == source.opt.timestep
+    # The one deliberate difference: the plant steps at the rate the FCI and
+    # controller_manager run at, not the identification model's rate. Stepping
+    # slower than the control loop leaves the controller reading a state that
+    # has not advanced, which mujoco_ros2_control reports as under-sampling.
+    assert wrapped.opt.timestep == PLANT_TIMESTEP_S
     assert wrapped.opt.integrator == source.opt.integrator
     assert wrapped.opt.disableflags == source.opt.disableflags
     np.testing.assert_array_equal(wrapped.opt.gravity, source.opt.gravity)
@@ -91,9 +95,17 @@ def test_plant_is_the_fitting_projection_and_nothing_else(
 def test_one_step_arm_dynamics_match_fitting_exactly(
     plant: Path, model_paths: ModelPaths
 ) -> None:
-    """A ROS-system-ID step is the fitting model step, modulo ROS names."""
+    """A ROS-system-ID step is the fitting model step, modulo ROS names.
+
+    The plant runs at the control rate, so the comparison holds the timestep
+    equal on purpose: what must match is the physics, not the integration
+    interval. State derivatives are compared at the same state, then one step
+    at the same step size.
+    """
     wrapped = mujoco.MjModel.from_xml_path(str(plant))
-    source = fitting_spec(model_paths.hydrax).compile()
+    source_spec = fitting_spec(model_paths.hydrax)
+    source_spec.option.timestep = PLANT_TIMESTEP_S
+    source = source_spec.compile()
     wrapped_data = mujoco.MjData(wrapped)
     source_data = mujoco.MjData(source)
 

@@ -584,8 +584,11 @@ def _torque_channels(real: bool) -> dict[str, object]:
                     ),
                     "fit_eligible_as_model_input": False,
                     "fit_exclusion_reason": (
-                        "hardware limiter/gravity composition has not yet "
-                        "been validated against the MuJoCo input convention"
+                        "link-side telemetry, past the transmission: rotor "
+                        "inertia and motor-side friction are absent from it, so "
+                        "it cannot drive a MuJoCo model carrying armature and "
+                        "frictionloss. Recorded as the cross-check on the "
+                        "commanded effort, which is the fit input"
                     ),
                     "native_array": "tau_J_d_native_Nm",
                     "aligned_array": "tau_J_d_Nm",

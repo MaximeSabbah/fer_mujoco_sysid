@@ -133,6 +133,19 @@ ARRAY_UNITS = {
 GAP_THRESHOLD_FRACTION = 1.5
 MAX_GAP_S = 0.05
 MISSING_FRACTION_LIMIT = 0.01
+
+# A simulated plant executes every control cycle, so a missed one means the
+# acquisition is wrong and MISSING_FRACTION_LIMIT applies. Real hardware on a
+# machine without an RT kernel takes occasional late cycles — the first FER
+# campaign held 938 Hz against a 1 kHz loop, 1.4% of cycles late — and that
+# loses no information: every recorded row is still a true (state, commanded
+# torque, timestamp) triple. What the fit actually depends on is reconstruction
+# on the model's 2 ms grid, so for hardware the assertions are that no gap
+# spans more than a few grid steps (measured worst case 7.6 ms) and that the
+# achieved rate stays far above the grid rate. That is stricter than the 50 ms
+# interpolation limit it replaces, not looser.
+REAL_MAX_GAP_S = 0.010
+REAL_MINIMUM_RATE_HZ = 250.0
 COVERAGE_MINIMUM = 0.98
 BOUND_COVERAGE_MAXIMUM = 1.02
 
@@ -486,7 +499,14 @@ def health_report(
     saturated = torque >= limits[None, :] - 1e-6
     saturated_fraction = saturated.mean(axis=0)
 
-    slew = np.abs(np.diff(command, axis=0) / steps[:, None])
+    # One control cycle produces one command increment, whatever time its
+    # timestamp happens to carry. When the loop catches up after a late cycle,
+    # two cycles land microseconds apart: on the first hardware campaign that
+    # turned an ordinary 0.49 Nm increment arriving 44 us later into a reported
+    # 11069 Nm/s, while the command itself stayed smooth. Rates are therefore
+    # measured over at least the nominal period; genuine limiter-relevant slew
+    # shows up as a large increment, which this still reports faithfully.
+    slew = np.abs(np.diff(command, axis=0) / np.maximum(steps, period)[:, None])
     torque_slew = {
         "maximum_Nm_s": np.max(slew, axis=0).tolist(),
         "p99_9_Nm_s": np.percentile(slew, 99.9, axis=0).tolist(),
@@ -507,14 +527,28 @@ def health_report(
             f"covers {coverage:.1%} of the protocol — rows outside the marked "
             "protocol interval were retained"
         )
-    if longest_gap > MAX_GAP_S:
+    real = recording_backend(manifest) == "real"
+    achieved_rate_hz = (len(time_s) - 1) / duration if duration > 0.0 else 0.0
+    gap_limit = REAL_MAX_GAP_S if real else MAX_GAP_S
+    if longest_gap > gap_limit:
         problems.append(
             f"a {longest_gap * 1e3:.0f} ms gap in the recording, beyond the "
-            f"{MAX_GAP_S * 1e3:.0f} ms interpolation limit"
+            f"{gap_limit * 1e3:.0f} ms limit"
         )
-    if missing_fraction > MISSING_FRACTION_LIMIT:
+    if not real:
+        if missing_fraction > MISSING_FRACTION_LIMIT:
+            problems.append(
+                f"{missing_fraction:.2%} of the run is missing across {gaps} gaps"
+            )
+    elif achieved_rate_hz < REAL_MINIMUM_RATE_HZ:
         problems.append(
-            f"{missing_fraction:.2%} of the run is missing across {gaps} gaps"
+            f"the control loop averaged {achieved_rate_hz:.0f} Hz, below the "
+            f"{REAL_MINIMUM_RATE_HZ:.0f} Hz this identification needs"
+        )
+    elif missing_fraction > MISSING_FRACTION_LIMIT:
+        warnings.append(
+            f"{missing_fraction:.2%} of cycles were late across {gaps} gaps; "
+            f"the loop averaged {achieved_rate_hz:.0f} Hz"
         )
     if saturated_fraction.max() > 0.0:
         joint = int(np.argmax(saturated_fraction))
@@ -625,6 +659,7 @@ def health_report(
         "gaps": gaps,
         "longest_gap_ms": longest_gap * 1e3,
         "missing_fraction": missing_fraction,
+        "achieved_rate_hz": achieved_rate_hz,
         "saturated_fraction": saturated_fraction.tolist(),
         "torque_slew": torque_slew,
         "tau_cmd_minus_tau_J_d": telemetry_mismatch,

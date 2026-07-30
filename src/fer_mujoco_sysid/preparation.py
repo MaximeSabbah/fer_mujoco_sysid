@@ -190,21 +190,26 @@ def _control_channel(
     arrays: Mapping[str, NDArray],
 ) -> tuple[str, NDArray[np.float64]]:
     if backend == "real":
-        channels = _mapping(manifest.get("torque_channels"), "torque channels")
-        desired = _mapping(channels.get("tau_J_d_Nm"), "tau_J_d_Nm torque semantics")
-        if desired.get("fit_eligible_as_model_input") is not True:
-            raise ValueError(
-                "real tau_J_d_Nm is preserved as diagnostic telemetry but its "
-                "limiter/gravity composition has not been validated as a "
-                "MuJoCo control input. Complete the hardware torque-semantics "
-                "calibration and reconvert before identification."
-            )
-        if "tau_J_d_Nm" not in arrays:
-            raise ValueError(
-                "real recording has no causally aligned hardware desired "
-                "link-side tau_J_d_Nm telemetry"
-            )
-        return "tau_J_d_Nm", np.asarray(arrays["tau_J_d_Nm"], dtype=np.float64)
+        # Every backend fits the trajectory controller's commanded effort, and
+        # the fitting model is gravity-free, because that pair *is* the FCI
+        # convention: the effort a controller sends is the effort on top of the
+        # robot's internal gravity compensation. Using a different channel on
+        # hardware would identify a different quantity than the simulated runs
+        # that validated this pipeline.
+        #
+        # tau_J_d and tau_J stay recorded as the cross-check: `health_report`
+        # compares tau_cmd against tau_J_d, which is how a limiter clamp or a
+        # gravity-composition surprise announces itself. Neither is a model
+        # input — they are link-side, past the transmission, so joint friction
+        # and rotor inertia do not appear in them the way MuJoCo's frictionloss
+        # and armature do.
+        for name in ("tau_J_d_Nm", "tau_J_Nm"):
+            if name not in arrays:
+                raise ValueError(
+                    f"real recording has no causally aligned {name} telemetry; "
+                    "the commanded effort cannot be cross-checked, so the run "
+                    "is not fit-eligible"
+                )
     return "tau_cmd_Nm", np.asarray(arrays["tau_cmd_Nm"], dtype=np.float64)
 
 

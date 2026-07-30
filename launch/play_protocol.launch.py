@@ -139,7 +139,25 @@ def launch_setup(context, *args, **kwargs):
             package="controller_manager",
             executable="ros2_control_node",
             output="screen",
-            parameters=[ParameterFile(str(CONTROLLERS_FILE)), robot_description],
+            parameters=[
+                ParameterFile(str(CONTROLLERS_FILE)),
+                robot_description,
+                # libfranka needs a torque command every millisecond and drops
+                # the connection when the loop misses one, so the control thread
+                # must be scheduled in real time. These are the values
+                # sbmpc_ros/config/franka_controllers.yaml runs this same robot
+                # with. Applied here rather than in the shared controllers file
+                # because pinning the loop to two cores would compete with the
+                # simulated plant's physics thread, and the simulation backend
+                # was validated without them.
+                # sbmpc_ros also pins to cpu_affinity [0, 1], but it can: with
+                # FIFO priority 98 the loop preempts everything on those cores.
+                # This machine has no RT kernel and refuses the priority
+                # ("Operation not permitted"), so pinning would crowd the loop
+                # onto 2 of 32 cores alongside the DDS and recorder threads.
+                # The request stays so it takes effect if privileges appear.
+                {"thread_priority": 98},
+            ],
             on_exit=Shutdown(),
         )
     actions.append(control_node)
@@ -238,10 +256,16 @@ def launch_setup(context, *args, **kwargs):
                 f"recording destination already exists: {resolved_record_dir}. "
                 "A run is immutable; choose a new destination."
             )
+        # Only what conversion reads, plus the markers that bound the protocol.
+        # /arm/joint_states and /dynamic_joint_states carry nothing that
+        # controller_state does not already carry (position, velocity, and the
+        # commanded effort, on one clock), and recording all three at the 1 kHz
+        # loop rate cost 277 MB per protocol and left the control loop running
+        # ~8% slow — every 1 kHz stream in the first hardware bag held exactly
+        # 86004 messages where 92000 cycles were due. Redundant data is not
+        # worth a slower torque loop.
         topics = [
-            ARM_JOINT_STATES_TOPIC,
             f"/{ARM_CONTROLLER}/controller_state",
-            "/dynamic_joint_states",
             PROTOCOL_EVENT_TOPIC,
         ]
         if is_mujoco:

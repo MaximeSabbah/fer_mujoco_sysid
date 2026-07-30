@@ -51,6 +51,15 @@
 
     <xacro:macro name="fer_sysid_joint" params="name initial_position">
       <joint name="${name}">
+        <!-- All three, because AgimusFrankaHardwareInterface refuses to
+             initialize otherwise: "Joint 'fer_joint1' has 1 command interfaces
+             found. 3 expected." The trajectory controller still claims only
+             effort (see config/fer_sysid_controllers.yaml), so what the robot
+             is commanded with is unchanged — position and velocity exist here
+             only because the hardware plugin requires the full set, exactly as
+             in sbmpc_ros' real description. -->
+        <command_interface name="position"/>
+        <command_interface name="velocity"/>
         <command_interface name="effort"/>
         <state_interface name="position">
           <param name="initial_value">${initial_position}</param>

@@ -19,6 +19,18 @@ controller_manager:
   ros__parameters:
     update_rate: 1000  # Hz
 
+    # This machine has no RT kernel, so the loop takes an occasional late
+    # cycle. With overrun management enabled the manager advances its schedule
+    # past every missed cycle (next_iteration_time += overruns * period),
+    # turning a 1.4 ms hiccup into permanently skipped cycles: the first
+    # hardware runs held 935/938 Hz and the recordings were rejected as 8%/6%
+    # incomplete. Letting the loop catch up instead is the configuration
+    # sbmpc_ros drives this same robot with. Warnings are off for the same
+    # reason it does: logging them at kilohertz is itself loop time.
+    overruns:
+      manage: false
+      print_warnings: false
+
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
@@ -27,6 +39,16 @@ controller_manager:
 
     fer_sysid_arm_controller:
       type: joint_trajectory_controller/JointTrajectoryController
+
+# This broadcaster runs inside the 1 kHz control loop and publishes two
+# messages per cycle (/arm/joint_states and /dynamic_joint_states). Nothing
+# needs them at that rate: identification reads the trajectory controller's own
+# state, and the player's preflight only checks a 20 mrad start pose and that
+# the arm is at rest. Publishing them at 1 kHz cost loop time the torque
+# command needs — the first hardware run held ~935 Hz instead of 1000.
+joint_state_broadcaster:
+  ros__parameters:
+    update_rate: 100
 
 # Full FCI telemetry: tau_J, tau_J_d, motor-side theta/dtheta, robot mode and
 # error flags. Only loadable against real hardware. The player reads the mode
