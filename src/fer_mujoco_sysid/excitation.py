@@ -81,11 +81,17 @@ class ProtocolLimitError(ValueError):
 class FrictionProtocolSpec:
     """Deterministic description of one friction-family protocol.
 
-    Each entry of ``cruise_speeds_rad_s`` produces one bidirectional
-    sweep pass whose largest-amplitude joint cruises at that speed
-    (smaller-amplitude joints cruise proportionally slower on the shared
-    schedule). Low speeds are deliberately over-represented: that is the
-    regime of the pregrasp standoff.
+    Each entry of ``cruise_speeds_rad_s`` produces one bidirectional pass across
+    the full amplitude envelope, with matched reversals and holds at the stops.
+    A slow cruise therefore lasts longer than a fast one, which is a property of
+    the motion, not a defect: the estimator equalizes the speeds by sampling
+    each cruise window equally.
+
+    The first hardware campaign fed all of it to least squares unweighted, so
+    87% of the samples came from one velocity and damping landed at 23-55%
+    relative uncertainty, negative on four joints. Its first leg also covered
+    half the span of the others, leaving one direction with twice the data of
+    the reverse and confounding Coulomb sign asymmetry. Both are fixed here.
     """
 
     protocol_id: str
@@ -94,7 +100,11 @@ class FrictionProtocolSpec:
     role: str = TRAIN_ROLE
     amplitudes_rad: tuple[float, ...] = (0.3,) * 7
     amplitude_jitter: float = 0.1
-    cruise_speeds_rad_s: tuple[float, ...] = (0.05, 0.15, 0.4)
+    # Four speeds spanning 8x. Each is swept across the full amplitude, so the
+    # slowest cruise is also the longest; 0.02 rad/s is left out because a full
+    # sweep at that speed would take half a minute per leg. 0.05 rad/s is the
+    # near-standstill regime that produced the 62 mm standoff.
+    cruise_speeds_rad_s: tuple[float, ...] = (0.05, 0.1, 0.2, 0.4)
     cruise_acceleration_rad_s2: float = 1.0
     transit_speed_rad_s: float = 0.3
     hold_s: float = 1.0
@@ -287,13 +297,54 @@ def generate_friction_protocol(
             )
         )
 
+    def transit_speed_for(start_offset: float, end_offset: float) -> float:
+        """Fastest transit that still fits its ramps inside the move.
+
+        The smoothstep ramps consume ``_RAMP_PEAK_ACCELERATION * v^2 / a`` of
+        travel before any cruise exists, so the short moves that position a
+        slow cruise inside the amplitude envelope cannot be taken at the
+        nominal transit speed. Leave a margin so the cruise is non-empty.
+        """
+        distance = abs(end_offset - start_offset) * largest
+        if distance <= 0.0:
+            return spec.transit_speed_rad_s
+        feasible = 0.9 * float(
+            np.sqrt(
+                spec.cruise_acceleration_rad_s2 * distance / _RAMP_PEAK_ACCELERATION
+            )
+        )
+        return min(spec.transit_speed_rad_s, feasible)
+
     hold_piece("settle", home, spec.settle_s, "settle_start")
+    # Every leg sweeps the full amplitude envelope, so ``amplitudes_rad`` is
+    # what the arm actually travels and the position-margin check can be
+    # triggered by it. Deriving travel from speed x time instead made a 1.5 rad
+    # amplitude produce a 0.15 rad sweep and silently disabled that gate.
+    #
+    # Both legs are symmetric (-A -> +A -> -A) so each direction gets identical
+    # time, which the original 0 -> +A -> -A ordering did not: its first leg was
+    # half the span, leaving 646 knots of one direction against 1299 of the
+    # other and confounding any Coulomb sign asymmetry.
+    #
+    # Slow cruises therefore last longer than fast ones, and that is fine: the
+    # imbalance is corrected where it belongs, in the estimator, by sampling
+    # each cruise window equally (see selection.balance_regions).
     offset = 0.0
+    if abs(offset - -1.0) > 1e-12:
+        sweep_piece(
+            "transit_to_envelope",
+            "return",
+            offset,
+            -1.0,
+            transit_speed_for(offset, -1.0),
+        )
+        offset = -1.0
     for speed in spec.cruise_speeds_rad_s:
         tag = f"{int(round(speed * 1000))}mrad_s"
         for target in (1.0, -1.0):
+            direction = "pos" if target > offset else "neg"
             sweep_piece(
-                f"sweep_{tag}_to_{'pos' if target > 0 else 'neg'}",
+                f"sweep_{tag}_to_{direction}",
                 "excitation",
                 offset,
                 target,
@@ -304,9 +355,9 @@ def generate_friction_protocol(
                 "hold",
                 home + offset * amplitudes,
                 spec.hold_s,
-                f"hold_{tag}_{'pos' if offset > 0 else 'neg'}",
+                f"hold_{tag}_{direction}",
             )
-    sweep_piece("return_home", "return", offset, 0.0, spec.transit_speed_rad_s)
+    sweep_piece("return_home", "return", offset, 0.0, transit_speed_for(offset, 0.0))
     hold_piece("settle", home, spec.settle_s, "settle_end")
 
     segments: list[Segment] = []
@@ -685,7 +736,16 @@ class InertialProtocolSpec:
         0.40,
     )
     periods: int = 2
-    amplitude_rad: tuple[float, ...] = (0.45, 0.35, 0.45, 0.35, 0.6, 0.6, 0.7)
+    #: Acceleration scales as ``A (2 pi f)^2``, and the base frequencies rise
+    #: from the base to the wrist, so equal amplitudes would leave the proximal
+    #: joints barely excited. Measured on hardware 2026-07-30 with the previous
+    #: uniform-ish amplitudes: joint 1 reached 2.5 rad/s^2 against its own
+    #: 15 rad/s^2 limit (0.81 RMS) while joint 7 reached 15.8 (7.5 RMS) — a 9x
+    #: disparity that left link1/link2 inertials unidentifiable. The proximal
+    #: amplitudes are raised to close it; each is still scaled down by whichever
+    #: position/velocity/acceleration limit binds, so a joint ends up excited to
+    #: *its* limit rather than to a fraction of it.
+    amplitude_rad: tuple[float, ...] = (1.4, 0.7, 0.8, 0.5, 0.6, 0.6, 0.7)
     sample_period_s: float = 0.01
     settle_s: float = 0.5
     home_qpos: tuple[float, ...] = _HOME_QPOS

@@ -1,0 +1,954 @@
+{
+  "analysis_policy": {
+    "detected_joint_reversals": 3929,
+    "detected_rate_limit_request_transients": 234,
+    "edge_guard_s": 0.1,
+    "hardware_torque_rate_limit_Nm_s": 1000.0,
+    "protocol_rows_array": "analysis_eligible",
+    "rate_limiter_policy": "exclude controller requests at/above the deployed hardware rate limit; do not infer the unresolved limited waveform; use native tau_J_d samples and the telemetry fit mask",
+    "reversal_guard_s": 0.03,
+    "segment_row_assignment": "latest mapped segment start; interpolation rows before the next segment start remain with the preceding segment",
+    "telemetry_rows_array": "telemetry_fit_eligible",
+    "torque_slew_guard_s": 0.03
+  },
+  "arrays": {
+    "analysis_eligible": {
+      "dtype": "|b1",
+      "shape": [
+        62872
+      ],
+      "unit": "bool"
+    },
+    "dq_rad_s": {
+      "dtype": "<f8",
+      "shape": [
+        62872,
+        7
+      ],
+      "unit": "rad/s"
+    },
+    "dtheta_native_rad_s": {
+      "dtype": "<f8",
+      "shape": [
+        6325,
+        7
+      ],
+      "unit": "rad/s"
+    },
+    "dtheta_rad_s": {
+      "dtype": "<f8",
+      "shape": [
+        62872,
+        7
+      ],
+      "unit": "rad/s"
+    },
+    "franka_new_sample": {
+      "dtype": "|b1",
+      "shape": [
+        62872
+      ],
+      "unit": "bool"
+    },
+    "franka_sample_age_s": {
+      "dtype": "<f8",
+      "shape": [
+        62872
+      ],
+      "unit": "s"
+    },
+    "franka_time_ns": {
+      "dtype": "<i8",
+      "shape": [
+        6325
+      ],
+      "unit": "ns"
+    },
+    "protocol_segment_index": {
+      "dtype": "<i2",
+      "shape": [
+        62872
+      ],
+      "unit": "index"
+    },
+    "q_desired_rad": {
+      "dtype": "<f8",
+      "shape": [
+        62872,
+        7
+      ],
+      "unit": "rad"
+    },
+    "q_rad": {
+      "dtype": "<f8",
+      "shape": [
+        62872,
+        7
+      ],
+      "unit": "rad"
+    },
+    "tau_J_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        62872,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "tau_J_d_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        62872,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "tau_J_d_native_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        6325,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "tau_J_native_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        6325,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "tau_cmd_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        62872,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "telemetry_fit_eligible": {
+      "dtype": "|b1",
+      "shape": [
+        62872
+      ],
+      "unit": "bool"
+    },
+    "telemetry_transient_free": {
+      "dtype": "|b1",
+      "shape": [
+        62872
+      ],
+      "unit": "bool"
+    },
+    "theta_native_rad": {
+      "dtype": "<f8",
+      "shape": [
+        6325,
+        7
+      ],
+      "unit": "rad"
+    },
+    "theta_rad": {
+      "dtype": "<f8",
+      "shape": [
+        62872,
+        7
+      ],
+      "unit": "rad"
+    },
+    "time_s": {
+      "dtype": "<f8",
+      "shape": [
+        62872
+      ],
+      "unit": "s"
+    }
+  },
+  "backend": "real",
+  "content_sha256": "6ba50fa1286f3f369f3ddd627041c959ac295811aa1ec96b8abd6ccf163404c3",
+  "format": "fer-mujoco-sysid/recording@2",
+  "health": {
+    "achieved_rate_hz": 992.3805324985872,
+    "coverage": 1.000690595845838,
+    "duration_s": 63.353721623000006,
+    "expected_duration_s": 63.31,
+    "gaps": 541,
+    "longest_gap_ms": 5.522639999998802,
+    "missing_fraction": 0.014178910567340998,
+    "problems": [],
+    "rate_hz": 999.7300728816285,
+    "samples": 62872,
+    "saturated_fraction": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "tau_cmd_minus_tau_J_d": {
+      "alignment": "nearest controller row to each native telemetry sample; diagnostic comparison only",
+      "bias_Nm": [
+        -0.00038287277868998275,
+        -0.0002437510583681968,
+        -0.001405201587519229,
+        0.0002434240061699357,
+        0.0004120771444559307,
+        0.00030228667715409134,
+        -3.0688526021161945e-06
+      ],
+      "interpretation": "diagnostic difference only; channel equivalence and post-limiter/applied semantics are not asserted",
+      "maximum_absolute_Nm": [
+        0.6604162347700466,
+        0.6023909698594776,
+        0.7773828754108787,
+        0.68056285400386,
+        0.23649654997421876,
+        0.1939779186951156,
+        0.08253217790730266
+      ],
+      "rmse_Nm": [
+        0.0651621051062279,
+        0.06362869364788126,
+        0.0754934178547899,
+        0.07210058888920698,
+        0.02837685345448746,
+        0.027738170005550317,
+        0.014445954938640551
+      ],
+      "samples": 6324
+    },
+    "telemetry_fit_rows": 3600,
+    "torque_slew": {
+      "maximum_Nm_s": [
+        718.4528315293046,
+        823.8669426311187,
+        882.1596015934321,
+        780.2047488010666,
+        327.71356391545487,
+        284.85133641003597,
+        106.4507906941474
+      ],
+      "p99_9_Nm_s": [
+        308.499673026454,
+        289.1469361071712,
+        339.3239427752758,
+        334.2402541605814,
+        123.21526828569633,
+        113.75723498835256,
+        53.06616168764948
+      ]
+    },
+    "usable": true,
+    "warnings": [
+      "1.42% of cycles were late across 541 gaps; the loop averaged 992 Hz"
+    ],
+    "worst_jitter_ms": 4.522370000000109
+  },
+  "joint_order": [
+    "fer_joint1",
+    "fer_joint2",
+    "fer_joint3",
+    "fer_joint4",
+    "fer_joint5",
+    "fer_joint6",
+    "fer_joint7"
+  ],
+  "mapped_analysis_windows": [
+    {
+      "analysis_eligible": true,
+      "end_time_s": 15.0,
+      "interval_id": "sweep_50mrad_s_to_pos_cruise",
+      "kind": "friction_cruise",
+      "nominal_velocity_rad_s": [
+        0.05,
+        0.044634812305548395,
+        0.04854205799747701,
+        0.04676446939539646,
+        0.04403692415040691,
+        0.04980888495507105,
+        0.04931844844450265
+      ],
+      "parent_segment_id": "sweep_50mrad_s_to_pos",
+      "start_time_s": 2.22
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 29.14,
+      "interval_id": "sweep_50mrad_s_to_neg_cruise",
+      "kind": "friction_cruise",
+      "nominal_velocity_rad_s": [
+        -0.05,
+        -0.044634812305548395,
+        -0.04854205799747701,
+        -0.04676446939539646,
+        -0.04403692415040691,
+        -0.04980888495507105,
+        -0.04931844844450265
+      ],
+      "parent_segment_id": "sweep_50mrad_s_to_neg",
+      "start_time_s": 16.360000000000003
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 36.75,
+      "interval_id": "sweep_100mrad_s_to_pos_cruise",
+      "kind": "friction_cruise",
+      "nominal_velocity_rad_s": [
+        0.1,
+        0.08926962461109679,
+        0.09708411599495402,
+        0.09352893879079292,
+        0.08807384830081381,
+        0.0996177699101421,
+        0.0986368968890053
+      ],
+      "parent_segment_id": "sweep_100mrad_s_to_pos",
+      "start_time_s": 30.580000000000002
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 44.43,
+      "interval_id": "sweep_100mrad_s_to_neg_cruise",
+      "kind": "friction_cruise",
+      "nominal_velocity_rad_s": [
+        -0.1,
+        -0.08926962461109679,
+        -0.09708411599495402,
+        -0.09352893879079292,
+        -0.08807384830081381,
+        -0.0996177699101421,
+        -0.0986368968890053
+      ],
+      "parent_segment_id": "sweep_100mrad_s_to_neg",
+      "start_time_s": 38.260000000000005
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 48.839999999999996,
+      "interval_id": "sweep_200mrad_s_to_pos_cruise",
+      "kind": "friction_cruise",
+      "nominal_velocity_rad_s": [
+        0.2,
+        0.17853924922219358,
+        0.19416823198990804,
+        0.18705787758158585,
+        0.17614769660162763,
+        0.1992355398202842,
+        0.1972737937780106
+      ],
+      "parent_segment_id": "sweep_200mrad_s_to_pos",
+      "start_time_s": 46.09
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 53.41,
+      "interval_id": "sweep_200mrad_s_to_neg_cruise",
+      "kind": "friction_cruise",
+      "nominal_velocity_rad_s": [
+        -0.2,
+        -0.17853924922219358,
+        -0.19416823198990804,
+        -0.18705787758158585,
+        -0.17614769660162763,
+        -0.1992355398202842,
+        -0.1972737937780106
+      ],
+      "parent_segment_id": "sweep_200mrad_s_to_neg",
+      "start_time_s": 50.660000000000004
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 56.35,
+      "interval_id": "sweep_400mrad_s_to_pos_cruise",
+      "kind": "friction_cruise",
+      "nominal_velocity_rad_s": [
+        0.4,
+        0.35707849844438716,
+        0.3883364639798161,
+        0.3741157551631717,
+        0.35229539320325526,
+        0.3984710796405684,
+        0.3945475875560212
+      ],
+      "parent_segment_id": "sweep_400mrad_s_to_pos",
+      "start_time_s": 55.53
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 59.58,
+      "interval_id": "sweep_400mrad_s_to_neg_cruise",
+      "kind": "friction_cruise",
+      "nominal_velocity_rad_s": [
+        -0.4,
+        -0.35707849844438716,
+        -0.3883364639798161,
+        -0.3741157551631717,
+        -0.35229539320325526,
+        -0.3984710796405684,
+        -0.3945475875560212
+      ],
+      "parent_segment_id": "sweep_400mrad_s_to_neg",
+      "start_time_s": 58.760000000000005
+    }
+  ],
+  "mapped_segments": [
+    {
+      "analysis_eligible": false,
+      "end_time_s": 0.5,
+      "interval_id": "settle_start",
+      "kind": "settle",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 0.0
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 2.04,
+      "interval_id": "transit_to_envelope",
+      "kind": "return",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 0.5
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 15.18,
+      "interval_id": "sweep_50mrad_s_to_pos",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 2.04
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 16.18,
+      "interval_id": "hold_50mrad_s_pos",
+      "kind": "hold",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 15.18
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 29.32,
+      "interval_id": "sweep_50mrad_s_to_neg",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 16.18
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 30.32,
+      "interval_id": "hold_50mrad_s_neg",
+      "kind": "hold",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 29.32
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 37.0,
+      "interval_id": "sweep_100mrad_s_to_pos",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 30.32
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 38.0,
+      "interval_id": "hold_100mrad_s_pos",
+      "kind": "hold",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 37.0
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 44.68,
+      "interval_id": "sweep_100mrad_s_to_neg",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 38.0
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 45.68,
+      "interval_id": "hold_100mrad_s_neg",
+      "kind": "hold",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 44.68
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 49.25,
+      "interval_id": "sweep_200mrad_s_to_pos",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 45.68
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 50.25,
+      "interval_id": "hold_200mrad_s_pos",
+      "kind": "hold",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 49.25
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 53.82,
+      "interval_id": "sweep_200mrad_s_to_neg",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 50.25
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 54.82,
+      "interval_id": "hold_200mrad_s_neg",
+      "kind": "hold",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 53.82
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 57.050000000000004,
+      "interval_id": "sweep_400mrad_s_to_pos",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 54.82
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 58.050000000000004,
+      "interval_id": "hold_400mrad_s_pos",
+      "kind": "hold",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 57.050000000000004
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 60.28,
+      "interval_id": "sweep_400mrad_s_to_neg",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 58.050000000000004
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 61.28,
+      "interval_id": "hold_400mrad_s_neg",
+      "kind": "hold",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 60.28
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 62.82,
+      "interval_id": "return_home",
+      "kind": "return",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 61.28
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 63.31,
+      "interval_id": "settle_end",
+      "kind": "settle",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 62.82
+    }
+  ],
+  "protocol": {
+    "analysis_windows": [
+      {
+        "end_index_exclusive": 1511,
+        "kind": "friction_cruise",
+        "nominal_velocity_rad_s": [
+          0.05,
+          0.044634812305548395,
+          0.04854205799747701,
+          0.04676446939539646,
+          0.04403692415040691,
+          0.04980888495507105,
+          0.04931844844450265
+        ],
+        "parent_segment_id": "sweep_50mrad_s_to_pos",
+        "start_index": 212,
+        "window_id": "sweep_50mrad_s_to_pos_cruise"
+      },
+      {
+        "end_index_exclusive": 2925,
+        "kind": "friction_cruise",
+        "nominal_velocity_rad_s": [
+          -0.05,
+          -0.044634812305548395,
+          -0.04854205799747701,
+          -0.04676446939539646,
+          -0.04403692415040691,
+          -0.04980888495507105,
+          -0.04931844844450265
+        ],
+        "parent_segment_id": "sweep_50mrad_s_to_neg",
+        "start_index": 1626,
+        "window_id": "sweep_50mrad_s_to_neg_cruise"
+      },
+      {
+        "end_index_exclusive": 3686,
+        "kind": "friction_cruise",
+        "nominal_velocity_rad_s": [
+          0.1,
+          0.08926962461109679,
+          0.09708411599495402,
+          0.09352893879079292,
+          0.08807384830081381,
+          0.0996177699101421,
+          0.0986368968890053
+        ],
+        "parent_segment_id": "sweep_100mrad_s_to_pos",
+        "start_index": 3048,
+        "window_id": "sweep_100mrad_s_to_pos_cruise"
+      },
+      {
+        "end_index_exclusive": 4454,
+        "kind": "friction_cruise",
+        "nominal_velocity_rad_s": [
+          -0.1,
+          -0.08926962461109679,
+          -0.09708411599495402,
+          -0.09352893879079292,
+          -0.08807384830081381,
+          -0.0996177699101421,
+          -0.0986368968890053
+        ],
+        "parent_segment_id": "sweep_100mrad_s_to_neg",
+        "start_index": 3816,
+        "window_id": "sweep_100mrad_s_to_neg_cruise"
+      },
+      {
+        "end_index_exclusive": 4895,
+        "kind": "friction_cruise",
+        "nominal_velocity_rad_s": [
+          0.2,
+          0.17853924922219358,
+          0.19416823198990804,
+          0.18705787758158585,
+          0.17614769660162763,
+          0.1992355398202842,
+          0.1972737937780106
+        ],
+        "parent_segment_id": "sweep_200mrad_s_to_pos",
+        "start_index": 4599,
+        "window_id": "sweep_200mrad_s_to_pos_cruise"
+      },
+      {
+        "end_index_exclusive": 5352,
+        "kind": "friction_cruise",
+        "nominal_velocity_rad_s": [
+          -0.2,
+          -0.17853924922219358,
+          -0.19416823198990804,
+          -0.18705787758158585,
+          -0.17614769660162763,
+          -0.1992355398202842,
+          -0.1972737937780106
+        ],
+        "parent_segment_id": "sweep_200mrad_s_to_neg",
+        "start_index": 5056,
+        "window_id": "sweep_200mrad_s_to_neg_cruise"
+      },
+      {
+        "end_index_exclusive": 5646,
+        "kind": "friction_cruise",
+        "nominal_velocity_rad_s": [
+          0.4,
+          0.35707849844438716,
+          0.3883364639798161,
+          0.3741157551631717,
+          0.35229539320325526,
+          0.3984710796405684,
+          0.3945475875560212
+        ],
+        "parent_segment_id": "sweep_400mrad_s_to_pos",
+        "start_index": 5543,
+        "window_id": "sweep_400mrad_s_to_pos_cruise"
+      },
+      {
+        "end_index_exclusive": 5969,
+        "kind": "friction_cruise",
+        "nominal_velocity_rad_s": [
+          -0.4,
+          -0.35707849844438716,
+          -0.3883364639798161,
+          -0.3741157551631717,
+          -0.35229539320325526,
+          -0.3984710796405684,
+          -0.3945475875560212
+        ],
+        "parent_segment_id": "sweep_400mrad_s_to_neg",
+        "start_index": 5866,
+        "window_id": "sweep_400mrad_s_to_neg_cruise"
+      }
+    ],
+    "content_sha256": "513414de362775fcd3862bcacdf170bb434f77adf47ea4280215259757554e46",
+    "duration_s": 63.31,
+    "family": "fer-friction",
+    "protocol_id": "fer-friction-a",
+    "role": "train",
+    "segments": [
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 50,
+        "exclusion_reason": "startup or shutdown transient",
+        "kind": "settle",
+        "segment_id": "settle_start",
+        "start_index": 0
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 204,
+        "exclusion_reason": "transit back to home",
+        "kind": "return",
+        "segment_id": "transit_to_envelope",
+        "start_index": 50
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 1518,
+        "kind": "excitation",
+        "segment_id": "sweep_50mrad_s_to_pos",
+        "start_index": 204
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 1618,
+        "exclusion_reason": "stationary hold is outside sliding-friction analysis",
+        "kind": "hold",
+        "segment_id": "hold_50mrad_s_pos",
+        "start_index": 1518
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 2932,
+        "kind": "excitation",
+        "segment_id": "sweep_50mrad_s_to_neg",
+        "start_index": 1618
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 3032,
+        "exclusion_reason": "stationary hold is outside sliding-friction analysis",
+        "kind": "hold",
+        "segment_id": "hold_50mrad_s_neg",
+        "start_index": 2932
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 3700,
+        "kind": "excitation",
+        "segment_id": "sweep_100mrad_s_to_pos",
+        "start_index": 3032
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 3800,
+        "exclusion_reason": "stationary hold is outside sliding-friction analysis",
+        "kind": "hold",
+        "segment_id": "hold_100mrad_s_pos",
+        "start_index": 3700
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 4468,
+        "kind": "excitation",
+        "segment_id": "sweep_100mrad_s_to_neg",
+        "start_index": 3800
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 4568,
+        "exclusion_reason": "stationary hold is outside sliding-friction analysis",
+        "kind": "hold",
+        "segment_id": "hold_100mrad_s_neg",
+        "start_index": 4468
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 4925,
+        "kind": "excitation",
+        "segment_id": "sweep_200mrad_s_to_pos",
+        "start_index": 4568
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 5025,
+        "exclusion_reason": "stationary hold is outside sliding-friction analysis",
+        "kind": "hold",
+        "segment_id": "hold_200mrad_s_pos",
+        "start_index": 4925
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 5382,
+        "kind": "excitation",
+        "segment_id": "sweep_200mrad_s_to_neg",
+        "start_index": 5025
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 5482,
+        "exclusion_reason": "stationary hold is outside sliding-friction analysis",
+        "kind": "hold",
+        "segment_id": "hold_200mrad_s_neg",
+        "start_index": 5382
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 5705,
+        "kind": "excitation",
+        "segment_id": "sweep_400mrad_s_to_pos",
+        "start_index": 5482
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 5805,
+        "exclusion_reason": "stationary hold is outside sliding-friction analysis",
+        "kind": "hold",
+        "segment_id": "hold_400mrad_s_pos",
+        "start_index": 5705
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 6028,
+        "kind": "excitation",
+        "segment_id": "sweep_400mrad_s_to_neg",
+        "start_index": 5805
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 6128,
+        "exclusion_reason": "stationary hold is outside sliding-friction analysis",
+        "kind": "hold",
+        "segment_id": "hold_400mrad_s_neg",
+        "start_index": 6028
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 6282,
+        "exclusion_reason": "transit back to home",
+        "kind": "return",
+        "segment_id": "return_home",
+        "start_index": 6128
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 6332,
+        "exclusion_reason": "startup or shutdown transient",
+        "kind": "settle",
+        "segment_id": "settle_end",
+        "start_index": 6282
+      }
+    ]
+  },
+  "protocol_timing": {
+    "end_stamp_ns": 1785411583399934949,
+    "marked_duration_s": 63.35460556500001,
+    "marker_format": "fer-mujoco-sysid/protocol-event@1",
+    "marker_topic": "/fer_sysid/protocol_event",
+    "recording_time_origin": "protocol start marker",
+    "selected_first_stamp_ns": 1785411520045525708,
+    "selected_last_stamp_ns": 1785411583399247331,
+    "speed_scale": 1.0,
+    "start_stamp_ns": 1785411520045329384
+  },
+  "raw_bag": "/workspace/fer_mujoco_sysid/output/real/fer-friction-a/raw",
+  "source_model": {
+    "path": "hydrax/models/panda/panda.xml",
+    "repository": "https://github.com/MaximeSabbah/hydrax.git",
+    "revision": "bdc4db9c249733c145f18eb5517b18e8c0e0c8b3",
+    "sha256": "7e8dfc2155ff5b87a10599b4b27b4aa000058e88fb9585aa803e6cb797f902d9"
+  },
+  "speed_scale": 1.0,
+  "telemetry_alignment": {
+    "control_channel_policy": "never use a future telemetry sample; retain only rows where the native sample changes for telemetry-based fitting",
+    "diagnostic_comparison_policy": "nearest sample only for skew diagnostics",
+    "expected_rate_hz": 100,
+    "maximum_age_s": 0.014481666,
+    "maximum_allowed_age_s": 0.035,
+    "maximum_allowed_diagnostic_nearest_skew_s": 0.02,
+    "maximum_allowed_median_rate_hz": 120.0,
+    "maximum_allowed_native_gap_s": 0.035,
+    "maximum_diagnostic_nearest_skew_s": 0.0069698500000000005,
+    "maximum_native_gap_s": 0.01448923,
+    "mean_age_s": 0.005492719836445477,
+    "method": "causal_previous_sample_hold",
+    "minimum_allowed_median_rate_hz": 80.0,
+    "native_samples": 6325,
+    "observed_median_rate_hz": 100.00382014592955
+  },
+  "torque_channels": {
+    "tau_J_Nm": {
+      "aligned_array": "tau_J_Nm",
+      "aligned_resampling": "causal_previous_sample_hold",
+      "meaning": "measured link-side joint effort diagnostic",
+      "message_field": "measured_joint_state.effort",
+      "native_array": "tau_J_native_Nm",
+      "source_topic": "/franka_robot_state_broadcaster/robot_state"
+    },
+    "tau_J_d_Nm": {
+      "aligned_array": "tau_J_d_Nm",
+      "aligned_resampling": "causal_previous_sample_hold",
+      "fit_eligible_as_model_input": false,
+      "fit_exclusion_reason": "link-side telemetry, past the transmission: rotor inertia and motor-side friction are absent from it, so it cannot drive a MuJoCo model carrying armature and frictionloss. Recorded as the cross-check on the commanded effort, which is the fit input",
+      "limiter_and_gravity_semantics": "not asserted beyond the upstream message definition",
+      "meaning": "hardware desired link-side joint effort telemetry",
+      "message_field": "desired_joint_state.effort",
+      "native_array": "tau_J_d_native_Nm",
+      "source_topic": "/franka_robot_state_broadcaster/robot_state"
+    },
+    "tau_cmd_Nm": {
+      "application_status": "not_asserted",
+      "clock": "controller state header",
+      "meaning": "joint_trajectory_controller output effort request",
+      "message_field": "output.effort",
+      "rate_limiting": "before_or_unknown_relative_to_hardware_limiting",
+      "source_topic": "/fer_sysid_arm_controller/controller_state"
+    }
+  },
+  "torque_limit_Nm": [
+    87.0,
+    87.0,
+    87.0,
+    87.0,
+    12.0,
+    12.0,
+    12.0
+  ],
+  "torque_slew_warning_Nm_s": [
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0
+  ],
+  "torque_source": "controller output effort request; applied/post-limiter status is not asserted"
+}

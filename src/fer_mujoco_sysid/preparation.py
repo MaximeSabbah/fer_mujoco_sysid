@@ -23,7 +23,11 @@ from fer_mujoco_sysid.fitting import MeasuredRun
 from fer_mujoco_sysid.io import sha256_file
 from fer_mujoco_sysid.preprocessing import FilterSettings, prepare
 from fer_mujoco_sysid.protocol import FRICTION_FAMILY, INERTIAL_FAMILY
-from fer_mujoco_sysid.selection import runs_from_mask
+from fer_mujoco_sysid.selection import (
+    balance_regions,
+    contiguous_regions,
+    runs_from_mask,
+)
 from fer_mujoco_sysid.stages import StageRecording
 
 CLASSICAL_SAMPLE_RATE_HZ = 100.0
@@ -265,12 +269,22 @@ def prepare_recording(
     filtered = prepare(grid, q, dq, control, settings)
     measured = np.column_stack([filtered.q_rad, filtered.dq_rad_s])
     samples = len(grid)
+    # Telemetry freshness gates the selection only when the telemetry channel is
+    # what drives the model. With the trajectory controller's own commanded
+    # effort as the input — present every control cycle, and measured on this
+    # robot to agree with tau_J_d to 1.7 mNm — requiring a fresh 100 Hz sample
+    # discards rows whose input is perfectly well known: on the first real
+    # campaign it shattered the cruise windows into ~95 fragments of 3-176 rows,
+    # against a 160-row fit window, leaving the rollout stage almost nothing to
+    # fit. The telemetry masks stay in the recording as diagnostics and apply
+    # again the moment tau_J_d becomes the input.
+    telemetry_drives_the_model = channel_name == "tau_J_d_Nm"
     analysis = _causal_resample(
         time_s,
         recording_rollout_mask(
             manifest,
             arrays,
-            require_telemetry=backend == "real",
+            require_telemetry=telemetry_drives_the_model,
         ),
         grid,
     ).astype(np.bool_)
@@ -279,7 +293,7 @@ def prepare_recording(
         recording_analysis_mask(
             manifest,
             arrays,
-            require_telemetry=backend == "real",
+            require_telemetry=telemetry_drives_the_model,
         ),
         grid,
     )
@@ -287,6 +301,9 @@ def prepare_recording(
     # backends. Real telemetry is natively 100 Hz; simulation is deliberately
     # thinned to the same diagnostic rate rather than claiming extra evidence.
     classical = _thin_event_mask(classical, step_s=step)
+    # Every cruise window contributes the same number of regressor samples, so a
+    # long slow cruise cannot outvote a short fast one.
+    classical = balance_regions(classical, contiguous_regions(analysis))
     protocol_mask = _causal_resample(time_s, _protocol_mask(arrays), grid).astype(
         np.bool_
     )

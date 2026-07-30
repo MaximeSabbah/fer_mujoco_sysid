@@ -1,0 +1,426 @@
+{
+  "analysis_policy": {
+    "detected_joint_reversals": 1210,
+    "detected_rate_limit_request_transients": 470,
+    "edge_guard_s": 0.1,
+    "hardware_torque_rate_limit_Nm_s": 1000.0,
+    "protocol_rows_array": "analysis_eligible",
+    "rate_limiter_policy": "exclude controller requests at/above the deployed hardware rate limit; do not infer the unresolved limited waveform; use native tau_J_d samples and the telemetry fit mask",
+    "reversal_guard_s": 0.03,
+    "segment_row_assignment": "latest mapped segment start; interpolation rows before the next segment start remain with the preceding segment",
+    "telemetry_rows_array": "telemetry_fit_eligible",
+    "torque_slew_guard_s": 0.03
+  },
+  "arrays": {
+    "analysis_eligible": {
+      "dtype": "|b1",
+      "shape": [
+        20772
+      ],
+      "unit": "bool"
+    },
+    "dq_rad_s": {
+      "dtype": "<f8",
+      "shape": [
+        20772,
+        7
+      ],
+      "unit": "rad/s"
+    },
+    "dtheta_native_rad_s": {
+      "dtype": "<f8",
+      "shape": [
+        2094,
+        7
+      ],
+      "unit": "rad/s"
+    },
+    "dtheta_rad_s": {
+      "dtype": "<f8",
+      "shape": [
+        20772,
+        7
+      ],
+      "unit": "rad/s"
+    },
+    "franka_new_sample": {
+      "dtype": "|b1",
+      "shape": [
+        20772
+      ],
+      "unit": "bool"
+    },
+    "franka_sample_age_s": {
+      "dtype": "<f8",
+      "shape": [
+        20772
+      ],
+      "unit": "s"
+    },
+    "franka_time_ns": {
+      "dtype": "<i8",
+      "shape": [
+        2094
+      ],
+      "unit": "ns"
+    },
+    "protocol_segment_index": {
+      "dtype": "<i2",
+      "shape": [
+        20772
+      ],
+      "unit": "index"
+    },
+    "q_desired_rad": {
+      "dtype": "<f8",
+      "shape": [
+        20772,
+        7
+      ],
+      "unit": "rad"
+    },
+    "q_rad": {
+      "dtype": "<f8",
+      "shape": [
+        20772,
+        7
+      ],
+      "unit": "rad"
+    },
+    "tau_J_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        20772,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "tau_J_d_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        20772,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "tau_J_d_native_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        2094,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "tau_J_native_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        2094,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "tau_cmd_Nm": {
+      "dtype": "<f8",
+      "shape": [
+        20772,
+        7
+      ],
+      "unit": "Nm"
+    },
+    "telemetry_fit_eligible": {
+      "dtype": "|b1",
+      "shape": [
+        20772
+      ],
+      "unit": "bool"
+    },
+    "telemetry_transient_free": {
+      "dtype": "|b1",
+      "shape": [
+        20772
+      ],
+      "unit": "bool"
+    },
+    "theta_native_rad": {
+      "dtype": "<f8",
+      "shape": [
+        2094,
+        7
+      ],
+      "unit": "rad"
+    },
+    "theta_rad": {
+      "dtype": "<f8",
+      "shape": [
+        20772,
+        7
+      ],
+      "unit": "rad"
+    },
+    "time_s": {
+      "dtype": "<f8",
+      "shape": [
+        20772
+      ],
+      "unit": "s"
+    }
+  },
+  "backend": "real",
+  "content_sha256": "83401cfc4599fd0cfb2c3889641aede257a0a47f46464d10da3b80a1799e60bb",
+  "format": "fer-mujoco-sysid/recording@2",
+  "health": {
+    "achieved_rate_hz": 989.7305566967075,
+    "coverage": 0.9993580893333335,
+    "duration_s": 20.986519876000003,
+    "expected_duration_s": 21.0,
+    "gaps": 211,
+    "longest_gap_ms": 5.5348740000003005,
+    "missing_fraction": 0.0167455374724561,
+    "problems": [],
+    "rate_hz": 999.8440243322854,
+    "samples": 20772,
+    "saturated_fraction": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "tau_cmd_minus_tau_J_d": {
+      "alignment": "nearest controller row to each native telemetry sample; diagnostic comparison only",
+      "bias_Nm": [
+        -0.0023194567687001436,
+        -0.00362741031752794,
+        0.004563231686582857,
+        0.005837713887199382,
+        -0.0013148552303799861,
+        -0.0011926351467984378,
+        -0.00016474760561599027
+      ],
+      "interpretation": "diagnostic difference only; channel equivalence and post-limiter/applied semantics are not asserted",
+      "maximum_absolute_Nm": [
+        1.6035883878152735,
+        2.0894761447561,
+        4.942779412288126,
+        3.1398678766531045,
+        1.9136075999404742,
+        0.7577408015144678,
+        0.29693823315024237
+      ],
+      "rmse_Nm": [
+        0.21605320993374932,
+        0.23963405970600876,
+        0.3012323554272966,
+        0.2755874165375085,
+        0.1200907924011044,
+        0.09653971456815647,
+        0.03753602414247578
+      ],
+      "samples": 2093
+    },
+    "telemetry_fit_rows": 239,
+    "torque_slew": {
+      "maximum_Nm_s": [
+        2318.5977681994686,
+        2686.5232305354357,
+        4445.17574038485,
+        3028.752685324746,
+        2255.5999211390463,
+        947.7844526055987,
+        417.50682660696407
+      ],
+      "p99_9_Nm_s": [
+        1241.8668681971692,
+        1385.946964386292,
+        1647.557468007126,
+        1499.9269015883467,
+        771.209910327691,
+        512.3397851630024,
+        220.76369342938392
+      ]
+    },
+    "usable": true,
+    "warnings": [
+      "1.67% of cycles were late across 211 gaps; the loop averaged 990 Hz",
+      "joint3 controller-request slew 4445 Nm/s exceeds its diagnostic threshold 1000 Nm/s"
+    ],
+    "worst_jitter_ms": 4.534718000000382
+  },
+  "joint_order": [
+    "fer_joint1",
+    "fer_joint2",
+    "fer_joint3",
+    "fer_joint4",
+    "fer_joint5",
+    "fer_joint6",
+    "fer_joint7"
+  ],
+  "mapped_analysis_windows": [
+    {
+      "analysis_eligible": true,
+      "end_time_s": 20.4,
+      "interval_id": "fourier_excitation",
+      "kind": "inertial_excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": "fourier",
+      "start_time_s": 0.6
+    }
+  ],
+  "mapped_segments": [
+    {
+      "analysis_eligible": false,
+      "end_time_s": 0.5,
+      "interval_id": "settle_start",
+      "kind": "settle",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 0.0
+    },
+    {
+      "analysis_eligible": true,
+      "end_time_s": 20.51,
+      "interval_id": "fourier",
+      "kind": "excitation",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 0.5
+    },
+    {
+      "analysis_eligible": false,
+      "end_time_s": 21.0,
+      "interval_id": "settle_end",
+      "kind": "settle",
+      "nominal_velocity_rad_s": null,
+      "parent_segment_id": null,
+      "start_time_s": 20.51
+    }
+  ],
+  "protocol": {
+    "analysis_windows": [
+      {
+        "end_index_exclusive": 2051,
+        "kind": "inertial_excitation",
+        "nominal_velocity_rad_s": null,
+        "parent_segment_id": "fourier",
+        "start_index": 50,
+        "window_id": "fourier_excitation"
+      }
+    ],
+    "content_sha256": "754dbee1dd3c2e9b6004b41dc3e568d64a7e79cb2a17fb4be758c0fe5c7440e3",
+    "duration_s": 21.0,
+    "family": "fer-inertial",
+    "protocol_id": "fer-inertial-a",
+    "role": "train",
+    "segments": [
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 50,
+        "exclusion_reason": "startup transient",
+        "kind": "settle",
+        "segment_id": "settle_start",
+        "start_index": 0
+      },
+      {
+        "analysis_eligible": true,
+        "end_index_exclusive": 2051,
+        "kind": "excitation",
+        "segment_id": "fourier",
+        "start_index": 50
+      },
+      {
+        "analysis_eligible": false,
+        "end_index_exclusive": 2101,
+        "exclusion_reason": "shutdown transient",
+        "kind": "settle",
+        "segment_id": "settle_end",
+        "start_index": 2051
+      }
+    ]
+  },
+  "protocol_timing": {
+    "end_stamp_ns": 1785413082239949670,
+    "marked_duration_s": 20.986736683,
+    "marker_format": "fer-mujoco-sysid/protocol-event@1",
+    "marker_topic": "/fer_sysid/protocol_event",
+    "recording_time_origin": "protocol start marker",
+    "selected_first_stamp_ns": 1785413061253407318,
+    "selected_last_stamp_ns": 1785413082239927194,
+    "speed_scale": 1.0,
+    "start_stamp_ns": 1785413061253212987
+  },
+  "raw_bag": "/workspace/fer_mujoco_sysid/output/real/fer-inertial-a/raw",
+  "source_model": {
+    "path": "hydrax/models/panda/panda.xml",
+    "repository": "https://github.com/MaximeSabbah/hydrax.git",
+    "revision": "bdc4db9c249733c145f18eb5517b18e8c0e0c8b3",
+    "sha256": "7e8dfc2155ff5b87a10599b4b27b4aa000058e88fb9585aa803e6cb797f902d9"
+  },
+  "speed_scale": 1.0,
+  "telemetry_alignment": {
+    "control_channel_policy": "never use a future telemetry sample; retain only rows where the native sample changes for telemetry-based fitting",
+    "diagnostic_comparison_policy": "nearest sample only for skew diagnostics",
+    "expected_rate_hz": 100,
+    "maximum_age_s": 0.013520976,
+    "maximum_allowed_age_s": 0.035,
+    "maximum_allowed_diagnostic_nearest_skew_s": 0.02,
+    "maximum_allowed_median_rate_hz": 120.0,
+    "maximum_allowed_native_gap_s": 0.035,
+    "maximum_diagnostic_nearest_skew_s": 0.006548536000000001,
+    "maximum_native_gap_s": 0.013538966000000001,
+    "mean_age_s": 0.005494143562006547,
+    "method": "causal_previous_sample_hold",
+    "minimum_allowed_median_rate_hz": 80.0,
+    "native_samples": 2094,
+    "observed_median_rate_hz": 100.00266007075787
+  },
+  "torque_channels": {
+    "tau_J_Nm": {
+      "aligned_array": "tau_J_Nm",
+      "aligned_resampling": "causal_previous_sample_hold",
+      "meaning": "measured link-side joint effort diagnostic",
+      "message_field": "measured_joint_state.effort",
+      "native_array": "tau_J_native_Nm",
+      "source_topic": "/franka_robot_state_broadcaster/robot_state"
+    },
+    "tau_J_d_Nm": {
+      "aligned_array": "tau_J_d_Nm",
+      "aligned_resampling": "causal_previous_sample_hold",
+      "fit_eligible_as_model_input": false,
+      "fit_exclusion_reason": "link-side telemetry, past the transmission: rotor inertia and motor-side friction are absent from it, so it cannot drive a MuJoCo model carrying armature and frictionloss. Recorded as the cross-check on the commanded effort, which is the fit input",
+      "limiter_and_gravity_semantics": "not asserted beyond the upstream message definition",
+      "meaning": "hardware desired link-side joint effort telemetry",
+      "message_field": "desired_joint_state.effort",
+      "native_array": "tau_J_d_native_Nm",
+      "source_topic": "/franka_robot_state_broadcaster/robot_state"
+    },
+    "tau_cmd_Nm": {
+      "application_status": "not_asserted",
+      "clock": "controller state header",
+      "meaning": "joint_trajectory_controller output effort request",
+      "message_field": "output.effort",
+      "rate_limiting": "before_or_unknown_relative_to_hardware_limiting",
+      "source_topic": "/fer_sysid_arm_controller/controller_state"
+    }
+  },
+  "torque_limit_Nm": [
+    87.0,
+    87.0,
+    87.0,
+    87.0,
+    12.0,
+    12.0,
+    12.0
+  ],
+  "torque_slew_warning_Nm_s": [
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0,
+    1000.0
+  ],
+  "torque_source": "controller output effort request; applied/post-limiter status is not asserted"
+}

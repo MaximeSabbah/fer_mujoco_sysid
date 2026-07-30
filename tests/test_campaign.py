@@ -64,26 +64,34 @@ def test_campaign_regeneration_matches_committed() -> None:
 
 
 def test_canonical_payloads_preserve_the_reviewed_motion() -> None:
-    """Flattening protocol storage must not alter any trajectory archive."""
+    """No trajectory archive changes without someone updating this ledger.
+
+    Both families were re-reviewed on 2026-07-30. The friction family was
+    rebuilt after the first hardware campaign showed 87% of its regressor
+    samples coming from one cruise speed and one direction carrying twice the
+    data of the reverse. The inertial amplitudes were raised in the same review
+    because joint 1 was excited to 17% of its acceleration limit while the wrist
+    sat at 80%, leaving the proximal link inertias unidentifiable.
+    """
     protocols = repository_root() / "protocols"
     expected = {
         "fer-friction-a": (
-            "a33e71274f8a900735ef0620052eca241819fa6028cb1855c13aa7dc169034fb"
+            "ad579630337659a3ff988f4449fe84a8dae215f01f15d06b44fab2d242df2262"
         ),
         "fer-friction-b": (
-            "53b7eac7469885c33cc8fd92c613759fdfecd69a2f7fb8e1003240ade5dbeb88"
+            "ea6b65f6f09072f2d745ed753c26c93719086d467946d5818da408dd8f2c8bba"
         ),
         "fer-friction-holdout": (
-            "f2c1f10e11effc50af1ee6f6e38474a9a44ed7bfe77e7355b4552ce3df13ea30"
+            "7e43db19e1edf25bca47ef4779ee5212fe021c8ea4ab4c1351eb15036cafb279"
         ),
         "fer-inertial-a": (
-            "d0b703ca351d1bb0ac5086d01419b5246bc639f8533c757106fd51a5868bb7cc"
+            "aca8c1c17cfe3f4f141abe2fbdbc21c48c984e3026fedc306227e7ce8ecd9260"
         ),
         "fer-inertial-b": (
-            "9f348e2aa227d90442e48af2180e66662e9810e94ad17c912facc2458c298c19"
+            "9902fb714d306442707a3757cb750380bfc90b3ed886470569179dc45587bbb2"
         ),
         "fer-inertial-holdout": (
-            "0ad26ec39c6ced707097a6a6ce9f3b831eb8fc35a56bb1954a09354bf695cce8"
+            "4a71114ccb0ad03a41a019d8272999dceaf96e0e42b9f80d032750ce2b903703"
         ),
     }
     assert {spec.protocol_id for spec in CAMPAIGN} == set(expected)

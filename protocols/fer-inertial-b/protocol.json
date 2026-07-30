@@ -42,7 +42,7 @@
       "unit": "s"
     }
   },
-  "content_sha256": "e196760e33fa45c52ef5e4e062c3a5fb264bcc081fedf86cc3390f7b414bcf07",
+  "content_sha256": "1fd7e298b6529038d4413b145d151cfe45fd4f2457d4a2d1b2a138d87318b7f0",
   "created_at": "2026-07-27T00:00:00Z",
   "description": "Per-joint finite Fourier series at distinct base frequencies, scaled to the kinematic limits and selected for regressor conditioning, for armature and inertial identification.",
   "end_state": {
@@ -72,10 +72,10 @@
     "seed": 202,
     "spec": {
       "amplitude_rad": [
-        0.45,
-        0.35,
-        0.45,
-        0.35,
+        1.4,
+        0.7,
+        0.8,
+        0.5,
         0.6,
         0.6,
         0.7

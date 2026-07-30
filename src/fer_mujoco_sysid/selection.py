@@ -32,6 +32,40 @@ def contiguous_regions(
     )
 
 
+def balance_regions(
+    selected: NDArray[np.bool_],
+    regions: tuple[slice, ...],
+) -> NDArray[np.bool_]:
+    """Keep an equal number of *selected* samples inside each region.
+
+    A cruise at 0.05 rad/s covers the same distance as one at 0.4 rad/s and so
+    lasts eight times as long. Handed to least squares unweighted, the slow
+    cruise dominates: the first real campaign drew 87% of its samples from one
+    velocity and could not resolve the viscous slope from the Coulomb offset,
+    returning negative damping on four joints. Equalizing here keeps the motion
+    large and physical while giving every speed the same say in the estimate.
+
+    Samples are thinned evenly across each region rather than truncated, so the
+    retained set still spans the whole cruise.
+    """
+    mask = np.asarray(selected, dtype=np.bool_)
+    if mask.ndim != 1:
+        raise ValueError("selection mask must be one-dimensional")
+    if not regions:
+        return np.zeros_like(mask)
+    available = [int(mask[region].sum()) for region in regions]
+    budget = min(available)
+    if budget <= 0:
+        raise ValueError("a cruise window contains no selected sample to fit")
+
+    balanced = np.zeros_like(mask)
+    for region in regions:
+        rows = np.flatnonzero(mask[region]) + (region.start or 0)
+        keep = np.linspace(0, len(rows) - 1, budget).round().astype(int)
+        balanced[rows[np.unique(keep)]] = True
+    return balanced
+
+
 def select_run(
     run: MeasuredRun,
     rows: slice,

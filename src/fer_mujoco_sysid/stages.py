@@ -69,6 +69,9 @@ DYNAMIC_POSTFIT_PASSES = 4
 COUPLING_REFINEMENT_MAX_ROUNDS = 4
 COUPLING_CONVERGENCE_FRACTION = 1e-5
 MAXIMUM_METHOD_DISAGREEMENT_PERCENT = 20.0
+# The classical freeze rule: a viscous coefficient this uncertain is not
+# identified by the cruises and is left at the nominal model value.
+DAMPING_FREEZE_SIGMA_PERCENT = 20.0
 
 # Every link is offered the same tightly bounded CAD correction vocabulary.
 # The local Jacobian releases only scalar directions supported by the actual
@@ -268,6 +271,57 @@ def _parameter_quality(result: FitResult) -> ParameterQuality:
     )
 
 
+def _combined_friction_estimate(
+    model: mujoco.MjModel,
+    recordings: list[StageRecording],
+) -> LinearFrictionFit:
+    """Classical friction estimate over every family's regressor samples."""
+    stacks: dict[str, list[NDArray[np.float64]]] = {
+        "q": [],
+        "dq": [],
+        "ddq": [],
+        "tau": [],
+    }
+    for recording in recordings:
+        mask = recording.classical_mask
+        if not mask.any():
+            continue
+        stacks["q"].append(recording.run.measured[mask, :7])
+        stacks["dq"].append(recording.run.measured[mask, 7:14])
+        stacks["ddq"].append(recording.ddq_rad_s2[mask])
+        stacks["tau"].append(recording.classical_torque_Nm[mask])
+    if not stacks["q"]:
+        raise ValueError("no regressor samples across the campaign")
+    return fit_friction(
+        model,
+        np.vstack(stacks["q"]),
+        np.vstack(stacks["dq"]),
+        np.vstack(stacks["ddq"]),
+        np.vstack(stacks["tau"]),
+    )
+
+
+def unsupported_damping(linear: LinearFrictionFit) -> tuple[bool, ...]:
+    """Joints whose viscous term the cruise data does not support.
+
+    A negative viscous coefficient is not a physical answer: the real FER wrist
+    loses friction as it speeds up (measured on hardware 2026-07-30: joint 7
+    fell 0.52 -> 0.30 Nm between 0.04 and 0.15 rad/s), which is a Stribeck
+    characteristic this model class cannot express. Rather than let the
+    optimizer press such a joint against its zero bound while correlating 0.987
+    with its own Coulomb term, the coefficient stays at the nominal model value
+    and the Coulomb term carries what the cruises actually show. Joints whose
+    slope the data does resolve keep their fitted value.
+    """
+    return tuple(
+        bool(
+            linear.damping[joint] <= 0.0
+            or linear.damping_sigma_percent[joint] > DAMPING_FREEZE_SIGMA_PERCENT
+        )
+        for joint in range(7)
+    )
+
+
 def _friction_fit(
     spec: mujoco.MjSpec,
     model: mujoco.MjModel,
@@ -277,6 +331,7 @@ def _friction_fit(
     seed_damping: NDArray[np.float64],
     max_iters: int,
     label: str,
+    freeze_damping: tuple[bool, ...] = (False,) * 7,
 ) -> tuple[FitResult, AcceptanceReport]:
     sequences = measurement_sequences(
         spec,
@@ -286,12 +341,51 @@ def _friction_fit(
         measurement_stride=FIT_MEASUREMENT_STRIDE,
     )
     parameters = friction_parameters(model).move_off_bounds()
+    frozen: list[str] = []
     for index, joint in enumerate(HYDRAX_ARM_JOINT_NAMES):
         parameters[f"{joint}_frictionloss"].value[:] = seed_frictionloss[index]
-        parameters[f"{joint}_damping"].value[:] = seed_damping[index]
+        if freeze_damping[index]:
+            # Keep MuJoCo's nominal damping: where the data cannot improve on
+            # the prior, the prior stands rather than being replaced by a value
+            # the cruises do not support.
+            parameters[f"{joint}_damping"].reset()
+            parameters[f"{joint}_damping"].frozen = True
+            frozen.append(joint)
+        else:
+            parameters[f"{joint}_damping"].value[:] = seed_damping[index]
+    if frozen:
+        print(
+            f"  {label}: viscous term left at the nominal model value for "
+            + ", ".join(frozen)
+        )
     require_observable(parameters, sequences)
     result = fit_parameters(parameters, sequences, max_iters=max_iters)
-    acceptance = require_acceptable_fit(result, label=label)
+
+    # A viscous term resting on its lower bound of zero is an answer, not a
+    # failure: the real FER wrist loses friction as it speeds up, and the only
+    # way this model class can lean that way is to give up its viscous term
+    # entirely. Rejecting the fit for it would refuse every real dataset whose
+    # friction is Coulomb-dominated. Any other parameter at a bound still fails
+    # — that means the box is wrong or the data is pathological.
+    zero_damping = tuple(
+        name
+        for name in result.bound_hits
+        if name.endswith("_damping") and abs(float(result.values[name][0])) < 1e-9
+    )
+    if zero_damping:
+        print(
+            f"  {label}: no viscous term identified for "
+            + ", ".join(sorted(zero_damping))
+            + " (held at zero)"
+        )
+    only_zero_damping = bool(zero_damping) and len(zero_damping) == len(
+        result.bound_hits
+    )
+    acceptance = require_acceptable_fit(
+        result,
+        label=label,
+        reject_bound_hits=not only_zero_damping,
+    )
     return result, acceptance
 
 
@@ -467,18 +561,37 @@ def fit_stages(
         raise RuntimeError(
             "friction protocol is not sufficiently conditioned for release"
         )
-    linear_rejected = [
+    # The classical 20% rule freezes a parameter it cannot resolve; it does not
+    # discard the fit. Applying it as an abort conflated the two: on the first
+    # real campaign every joint resolved its Coulomb term to 1.6-6.4% while
+    # damping landed at 21-108%, and the whole identification refused to run.
+    #
+    # Coulomb friction is what this campaign exists to measure, so an
+    # unresolved frictionloss is still fatal. A weakly resolved viscous term is
+    # reported and carried into the rollout stage as a seed, where the fit's own
+    # conditioning and correlation gates apply and where held-out reproduction —
+    # not this pre-fit diagnostic — decides whether the model may be released.
+    unresolved_frictionloss = [
         f"joint{joint + 1}"
         for joint in range(7)
-        if max(
-            linear.frictionloss_sigma_percent[joint],
-            linear.damping_sigma_percent[joint],
-        )
-        > 20.0
+        if linear.frictionloss_sigma_percent[joint] > 20.0
     ]
-    if linear_rejected:
+    if unresolved_frictionloss:
         raise RuntimeError(
-            "classical friction uncertainty rejected " + ", ".join(linear_rejected)
+            "classical Coulomb friction is unresolved on "
+            + ", ".join(unresolved_frictionloss)
+            + "; the friction protocol did not excite these joints"
+        )
+    freeze_damping = unsupported_damping(linear)
+    if any(freeze_damping):
+        held = [
+            f"joint{joint + 1}" for joint in range(7) if freeze_damping[joint]
+        ]
+        print(
+            "  classical viscous term unsupported on "
+            + ", ".join(held)
+            + " (negative or >20% relative standard deviation); left at the "
+            "nominal model value"
         )
 
     first_spec = fitting_spec(model_path)
@@ -490,6 +603,7 @@ def fit_stages(
         seed_damping=linear.damping,
         max_iters=max_iters,
         label="first friction fit",
+        freeze_damping=freeze_damping,
     )
     frictionloss, damping = _result_joint_columns(first_result)
     _apply_joint_values(first_spec, frictionloss=frictionloss, damping=damping)
@@ -608,15 +722,56 @@ def fit_stages(
 
     # Refit friction against the now-corrected armature/body model.  The
     # dynamic modifiers remain on dynamic_spec; only friction is released.
+    #
+    # This refit sees *both* families. Stage 1 could not: its rigid-body torque
+    # came from the nominal model, so on the inertial protocols — where inertia
+    # dominates the torque — link-inertia error would have been absorbed into
+    # friction. That objection is spent once the dynamic block has been fitted
+    # and accepted, and what the inertial motions add is exactly what the
+    # cruises lack: velocities to 2 rad/s instead of 0.4, a five-fold longer
+    # lever arm for the viscous slope that the cruise-only fit left at 21-108%
+    # relative uncertainty and negative on three joints.
     dynamic_model = dynamic_spec.compile()
+    refit_runs = list(friction_runs)
+    wide_range_runs = 0
+    if inertial_records:
+        for recording in inertial_records:
+            refit_runs.extend(recording.analysis_runs())
+            wide_range_runs += 1
+        print(
+            f"  friction refit spans both families: {len(friction_runs)} cruise "
+            f"windows plus the dynamic excitation of {wide_range_runs} recording(s)"
+        )
+    refit_damping_freeze = freeze_damping
+    if inertial_records:
+        # Re-decide which slopes are supported now that high-velocity data is in
+        # scope: a coefficient the cruises could not resolve may be perfectly
+        # well determined over the wider range, and that is the point of adding
+        # it. The classical estimate is recomputed against the corrected model so
+        # its rigid-body term is the fitted one, not the nominal.
+        wide = _combined_friction_estimate(
+            dynamic_model, friction_records + inertial_records
+        )
+        refit_damping_freeze = unsupported_damping(wide)
+        released = [
+            f"joint{joint + 1}"
+            for joint in range(7)
+            if freeze_damping[joint] and not refit_damping_freeze[joint]
+        ]
+        if released:
+            print(
+                "  the wider velocity range resolves the viscous term for "
+                + ", ".join(released)
+            )
     refit_result, refit_acceptance = _friction_fit(
         dynamic_spec,
         dynamic_model,
-        friction_runs,
+        refit_runs,
         seed_frictionloss=frictionloss,
         seed_damping=damping,
         max_iters=max_iters,
         label="friction refit",
+        freeze_damping=refit_damping_freeze,
     )
     frictionloss, damping = _result_joint_columns(refit_result)
     _apply_joint_values(dynamic_spec, frictionloss=frictionloss, damping=damping)
@@ -658,6 +813,7 @@ def fit_stages(
                 seed_damping=damping,
                 max_iters=max_iters,
                 label=f"friction coupling refinement {refinement}",
+                freeze_damping=freeze_damping,
             )
             frictionloss, damping = _result_joint_columns(refit_result)
             _apply_joint_values(

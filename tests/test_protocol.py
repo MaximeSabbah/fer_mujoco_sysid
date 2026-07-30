@@ -124,7 +124,13 @@ def test_friction_mask_selects_only_guarded_true_cruises(bundles) -> None:
     assert mask.any()
     assert not mask[recording_time_s < start_time_s].any()
     windows = protocol_analysis_windows(manifest)
-    assert len(windows) == 6
+    # One cruise per direction per speed, and both directions must be present in
+    # equal number: a family that swept one way more than the other could not
+    # separate the sign-flipping Coulomb term from a configuration-dependent bias.
+    speeds = {window.window_id.split("_to_")[0] for window in windows}
+    assert len(windows) == 2 * len(speeds)
+    forward = [window for window in windows if window.window_id.endswith("pos_cruise")]
+    assert len(forward) == len(speeds)
     assert {window.kind for window in windows} == {FRICTION_CRUISE}
 
     protocol_indices = np.rint(

@@ -1,7 +1,7 @@
 {
   "analysis_windows": [
     {
-      "end_index_exclusive": 470,
+      "end_index_exclusive": 1032,
       "kind": "friction_cruise",
       "nominal_velocity_rad_s": [
         0.067253258856138,
@@ -13,11 +13,11 @@
         0.06822124857327516
       ],
       "parent_segment_id": "sweep_70mrad_s_to_pos",
-      "start_index": 61,
+      "start_index": 204,
       "window_id": "sweep_70mrad_s_to_pos_cruise"
     },
     {
-      "end_index_exclusive": 1419,
+      "end_index_exclusive": 1981,
       "kind": "friction_cruise",
       "nominal_velocity_rad_s": [
         -0.067253258856138,
@@ -29,11 +29,11 @@
         -0.06822124857327516
       ],
       "parent_segment_id": "sweep_70mrad_s_to_neg",
-      "start_index": 591,
+      "start_index": 1153,
       "window_id": "sweep_70mrad_s_to_neg_cruise"
     },
     {
-      "end_index_exclusive": 1823,
+      "end_index_exclusive": 2385,
       "kind": "friction_cruise",
       "nominal_velocity_rad_s": [
         0.19215216816039427,
@@ -45,11 +45,11 @@
         0.19491785306650045
       ],
       "parent_segment_id": "sweep_200mrad_s_to_pos",
-      "start_index": 1560,
+      "start_index": 2122,
       "window_id": "sweep_200mrad_s_to_pos_cruise"
     },
     {
-      "end_index_exclusive": 2247,
+      "end_index_exclusive": 2809,
       "kind": "friction_cruise",
       "nominal_velocity_rad_s": [
         -0.19215216816039427,
@@ -61,11 +61,11 @@
         -0.19491785306650045
       ],
       "parent_segment_id": "sweep_200mrad_s_to_neg",
-      "start_index": 1984,
+      "start_index": 2546,
       "window_id": "sweep_200mrad_s_to_neg_cruise"
     },
     {
-      "end_index_exclusive": 2545,
+      "end_index_exclusive": 3107,
       "kind": "friction_cruise",
       "nominal_velocity_rad_s": [
         0.33626629428068994,
@@ -77,11 +77,11 @@
         0.3411062428663757
       ],
       "parent_segment_id": "sweep_350mrad_s_to_pos",
-      "start_index": 2430,
+      "start_index": 2992,
       "window_id": "sweep_350mrad_s_to_pos_cruise"
     },
     {
-      "end_index_exclusive": 2865,
+      "end_index_exclusive": 3427,
       "kind": "friction_cruise",
       "nominal_velocity_rad_s": [
         -0.33626629428068994,
@@ -93,7 +93,7 @@
         -0.3411062428663757
       ],
       "parent_segment_id": "sweep_350mrad_s_to_neg",
-      "start_index": 2750,
+      "start_index": 3312,
       "window_id": "sweep_350mrad_s_to_neg_cruise"
     }
   ],
@@ -101,7 +101,7 @@
     "ddq_rad_s2": {
       "dtype": "<f8",
       "shape": [
-        3210,
+        3772,
         7
       ],
       "unit": "rad/s^2"
@@ -109,7 +109,7 @@
     "dq_rad_s": {
       "dtype": "<f8",
       "shape": [
-        3210,
+        3772,
         7
       ],
       "unit": "rad/s"
@@ -117,7 +117,7 @@
     "q_rad": {
       "dtype": "<f8",
       "shape": [
-        3210,
+        3772,
         7
       ],
       "unit": "rad"
@@ -125,12 +125,12 @@
     "time_s": {
       "dtype": "<f8",
       "shape": [
-        3210
+        3772
       ],
       "unit": "s"
     }
   },
-  "content_sha256": "fcb243ebe006319cf9e096acb2a76f645b7fe3e20f5dd27359b712b246db3982",
+  "content_sha256": "ec3bd11e2447ec21da08b7b5c7dac91ce2c51c24d7c914a7573dc7a83c6bd706",
   "created_at": "2026-07-27T00:00:00Z",
   "description": "Jerk-limited trapezoidal sweeps with constant-velocity cruises at several low speeds, holds at the stops, and reversals at matched configurations, for frictionloss/damping identification.",
   "end_state": {
@@ -248,7 +248,7 @@
   },
   "playback": {
     "command_interface": "joint_trajectory",
-    "duration_s": 32.09,
+    "duration_s": 37.71,
     "joint_order": [
       "fer_joint1",
       "fer_joint2",
@@ -259,7 +259,7 @@
       "fer_joint7"
     ],
     "sample_period_s": 0.01,
-    "samples": 3210
+    "samples": 3772
   },
   "protocol_id": "fer-friction-holdout",
   "role": "holdout",
@@ -273,110 +273,118 @@
       "start_index": 0
     },
     {
-      "analysis_eligible": true,
-      "end_index_exclusive": 480,
-      "kind": "excitation",
-      "segment_id": "sweep_70mrad_s_to_pos",
+      "analysis_eligible": false,
+      "end_index_exclusive": 193,
+      "exclusion_reason": "transit back to home",
+      "kind": "return",
+      "segment_id": "transit_to_envelope",
       "start_index": 50
     },
     {
+      "analysis_eligible": true,
+      "end_index_exclusive": 1042,
+      "kind": "excitation",
+      "segment_id": "sweep_70mrad_s_to_pos",
+      "start_index": 193
+    },
+    {
       "analysis_eligible": false,
-      "end_index_exclusive": 580,
+      "end_index_exclusive": 1142,
       "exclusion_reason": "stationary hold is outside sliding-friction analysis",
       "kind": "hold",
       "segment_id": "hold_70mrad_s_pos",
-      "start_index": 480
+      "start_index": 1042
     },
     {
       "analysis_eligible": true,
-      "end_index_exclusive": 1429,
+      "end_index_exclusive": 1991,
       "kind": "excitation",
       "segment_id": "sweep_70mrad_s_to_neg",
-      "start_index": 580
+      "start_index": 1142
     },
     {
       "analysis_eligible": false,
-      "end_index_exclusive": 1529,
+      "end_index_exclusive": 2091,
       "exclusion_reason": "stationary hold is outside sliding-friction analysis",
       "kind": "hold",
       "segment_id": "hold_70mrad_s_neg",
-      "start_index": 1429
+      "start_index": 1991
     },
     {
       "analysis_eligible": true,
-      "end_index_exclusive": 1853,
+      "end_index_exclusive": 2415,
       "kind": "excitation",
       "segment_id": "sweep_200mrad_s_to_pos",
-      "start_index": 1529
+      "start_index": 2091
     },
     {
       "analysis_eligible": false,
-      "end_index_exclusive": 1953,
+      "end_index_exclusive": 2515,
       "exclusion_reason": "stationary hold is outside sliding-friction analysis",
       "kind": "hold",
       "segment_id": "hold_200mrad_s_pos",
-      "start_index": 1853
+      "start_index": 2415
     },
     {
       "analysis_eligible": true,
-      "end_index_exclusive": 2277,
+      "end_index_exclusive": 2839,
       "kind": "excitation",
       "segment_id": "sweep_200mrad_s_to_neg",
-      "start_index": 1953
+      "start_index": 2515
     },
     {
       "analysis_eligible": false,
-      "end_index_exclusive": 2377,
+      "end_index_exclusive": 2939,
       "exclusion_reason": "stationary hold is outside sliding-friction analysis",
       "kind": "hold",
       "segment_id": "hold_200mrad_s_neg",
-      "start_index": 2277
+      "start_index": 2839
     },
     {
       "analysis_eligible": true,
-      "end_index_exclusive": 2597,
+      "end_index_exclusive": 3159,
       "kind": "excitation",
       "segment_id": "sweep_350mrad_s_to_pos",
-      "start_index": 2377
+      "start_index": 2939
     },
     {
       "analysis_eligible": false,
-      "end_index_exclusive": 2697,
+      "end_index_exclusive": 3259,
       "exclusion_reason": "stationary hold is outside sliding-friction analysis",
       "kind": "hold",
       "segment_id": "hold_350mrad_s_pos",
-      "start_index": 2597
+      "start_index": 3159
     },
     {
       "analysis_eligible": true,
-      "end_index_exclusive": 2917,
+      "end_index_exclusive": 3479,
       "kind": "excitation",
       "segment_id": "sweep_350mrad_s_to_neg",
-      "start_index": 2697
+      "start_index": 3259
     },
     {
       "analysis_eligible": false,
-      "end_index_exclusive": 3017,
+      "end_index_exclusive": 3579,
       "exclusion_reason": "stationary hold is outside sliding-friction analysis",
       "kind": "hold",
       "segment_id": "hold_350mrad_s_neg",
-      "start_index": 2917
+      "start_index": 3479
     },
     {
       "analysis_eligible": false,
-      "end_index_exclusive": 3160,
+      "end_index_exclusive": 3722,
       "exclusion_reason": "transit back to home",
       "kind": "return",
       "segment_id": "return_home",
-      "start_index": 3017
+      "start_index": 3579
     },
     {
       "analysis_eligible": false,
-      "end_index_exclusive": 3210,
+      "end_index_exclusive": 3772,
       "exclusion_reason": "startup or shutdown transient",
       "kind": "settle",
       "segment_id": "settle_end",
-      "start_index": 3160
+      "start_index": 3722
     }
   ],
   "source_model": {
