@@ -311,10 +311,13 @@ def _mock_identification_attempt(
         parameters=object(),
         summary=lambda: {"mock": True},
     )
+    # Release turns on the held-out error ratio against nominal, so the
+    # fixture states that ratio rather than a bare verdict: below 1.0 is a
+    # better simulator than the one in service and ships, above it does not.
     acceptance = identify.ReproductionAcceptance(
         accepted=accepted,
         problems=() if accepted else ("fixture rejection",),
-        relative_scores={},
+        relative_scores={"friction-holdout": 0.5 if accepted else 1.5},
     )
     export_calls: list[dict[str, object]] = []
 

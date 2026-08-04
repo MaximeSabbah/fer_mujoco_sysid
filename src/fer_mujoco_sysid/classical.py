@@ -30,6 +30,7 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 from numpy.typing import NDArray
+from scipy.optimize import lsq_linear
 
 #: Below this speed a joint is not reliably sliding: ``sign(dq)`` is
 #: meaningless in the stiction band and drags the Coulomb estimate down.
@@ -77,6 +78,21 @@ class LinearFrictionFit:
                 f"| {int(self.samples[joint])} |"
             )
         return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class CandidateClassicalFit:
+    """Constrained direct seed matching one friction candidate contract.
+
+    ``linear`` keeps the established reporting shape. ``fitted_damping``
+    distinguishes an estimated viscous coefficient from a fixed candidate
+    value; a fixed coordinate has zero conditional uncertainty and is never
+    presented as an optimizer result.
+    """
+
+    linear: LinearFrictionFit
+    fitted_damping: tuple[bool, ...]
+    bound_hits: tuple[str, ...]
 
 
 def newey_west_covariance(
@@ -223,4 +239,147 @@ def fit_friction(
         samples=counts,
         covariance_method="Newey-West HAC" if hac_lags else "HC1",
         covariance_lags=hac_lags,
+    )
+
+
+def fit_friction_conditioned(
+    model: mujoco.MjModel,
+    q_rad: NDArray[np.float64],
+    dq_rad_s: NDArray[np.float64],
+    ddq_rad_s2: NDArray[np.float64],
+    tau_Nm: NDArray[np.float64],
+    *,
+    damping_reference_Nm_s: NDArray[np.float64],
+    fit_damping: NDArray[np.bool_],
+    sliding_threshold_rad_s: float = SLIDING_THRESHOLD_RAD_S,
+    hac_lags: int = DEFAULT_HAC_LAGS,
+    frictionloss_bounds_Nm: tuple[float, float] = (0.0, 3.0),
+    damping_bounds_Nm_s: tuple[float, float] = (0.0, 8.0),
+) -> CandidateClassicalFit:
+    """Fit nonnegative Coulomb friction with explicitly conditioned damping.
+
+    A fixed-damping candidate first subtracts ``damping_reference * dq`` and
+    regresses only the Coulomb column. Selected ``C+`` joints retain both
+    columns. This prevents a nominal or zero damping value from entering the
+    optimizer vector merely because it appears in the compiled model.
+    """
+    q = np.asarray(q_rad, dtype=np.float64)
+    dq = np.asarray(dq_rad_s, dtype=np.float64)
+    ddq = np.asarray(ddq_rad_s2, dtype=np.float64)
+    tau = np.asarray(tau_Nm, dtype=np.float64)
+    damping_reference = np.asarray(damping_reference_Nm_s, dtype=np.float64)
+    fitted_damping = np.asarray(fit_damping, dtype=np.bool_)
+
+    if q.ndim != 2 or q.shape[1] != 7:
+        raise ValueError(f"q_rad must have shape (samples, 7), got {q.shape}")
+    expected = q.shape
+    for name, values in (("dq_rad_s", dq), ("ddq_rad_s2", ddq), ("tau_Nm", tau)):
+        if values.shape != expected:
+            raise ValueError(f"{name} must have shape {expected}, got {values.shape}")
+    if damping_reference.shape != (7,):
+        raise ValueError("damping_reference_Nm_s must have shape (7,)")
+    if fitted_damping.shape != (7,):
+        raise ValueError("fit_damping must have shape (7,)")
+    if not np.isfinite(sliding_threshold_rad_s) or sliding_threshold_rad_s < 0.0:
+        raise ValueError("sliding_threshold_rad_s must be finite and nonnegative")
+    if not isinstance(hac_lags, int) or hac_lags < 0:
+        raise ValueError("hac_lags must be a non-negative integer")
+    for name, bounds in (
+        ("frictionloss_bounds_Nm", frictionloss_bounds_Nm),
+        ("damping_bounds_Nm_s", damping_bounds_Nm_s),
+    ):
+        if (
+            len(bounds) != 2
+            or not np.isfinite(bounds).all()
+            or bounds[0] < 0.0
+            or bounds[0] >= bounds[1]
+        ):
+            raise ValueError(f"{name} must be finite, nonnegative, and increasing")
+    if not all(np.isfinite(values).all() for values in (q, dq, ddq, tau)):
+        raise ValueError("friction regression inputs must be finite")
+    if not np.isfinite(damping_reference).all() or (damping_reference < 0.0).any():
+        raise ValueError("damping_reference_Nm_s must be finite and nonnegative")
+
+    residual = tau - rigid_body_torque(model, q, dq, ddq)
+    frictionloss = np.zeros(7, dtype=np.float64)
+    damping = damping_reference.copy()
+    condition = np.zeros(7, dtype=np.float64)
+    friction_sigma = np.zeros(7, dtype=np.float64)
+    damping_sigma = np.zeros(7, dtype=np.float64)
+    counts = np.zeros(7, dtype=np.intp)
+    bound_hits: list[str] = []
+
+    for joint in range(7):
+        sliding = np.abs(dq[:, joint]) > sliding_threshold_rad_s
+        counts[joint] = int(sliding.sum())
+        columns = 2 if fitted_damping[joint] else 1
+        if counts[joint] <= columns:
+            raise ValueError(
+                f"joint{joint + 1} slides in only {counts[joint]} samples above "
+                f"{sliding_threshold_rad_s} rad/s"
+            )
+
+        velocity = dq[sliding, joint]
+        target = residual[sliding, joint]
+        if fitted_damping[joint]:
+            regressor = np.column_stack((np.sign(velocity), velocity))
+            lower = np.array(
+                (frictionloss_bounds_Nm[0], damping_bounds_Nm_s[0])
+            )
+            upper = np.array(
+                (frictionloss_bounds_Nm[1], damping_bounds_Nm_s[1])
+            )
+        else:
+            target = target - damping_reference[joint] * velocity
+            regressor = np.sign(velocity)[:, None]
+            lower = np.array((frictionloss_bounds_Nm[0],))
+            upper = np.array((frictionloss_bounds_Nm[1],))
+
+        scale = np.linalg.norm(regressor, axis=0)
+        if (scale <= 0.0).any() or np.linalg.matrix_rank(regressor) != columns:
+            raise ValueError(f"joint{joint + 1} friction regressor is rank deficient")
+        solution = lsq_linear(regressor, target, bounds=(lower, upper))
+        if not solution.success or not np.isfinite(solution.x).all():
+            raise ValueError(
+                f"joint{joint + 1} constrained friction solve failed: "
+                f"{solution.message}"
+            )
+        frictionloss[joint] = solution.x[0]
+        if fitted_damping[joint]:
+            damping[joint] = solution.x[1]
+        condition[joint] = float(np.linalg.cond(regressor / scale))
+
+        error = target - regressor @ solution.x
+        covariance = newey_west_covariance(
+            regressor,
+            error,
+            max_lags=min(hac_lags, len(target) - 1),
+        )
+        relative_sigma = 100.0 * np.sqrt(
+            np.maximum(np.diag(covariance), 0.0)
+        ) / np.maximum(np.abs(solution.x), 1e-12)
+        friction_sigma[joint] = relative_sigma[0]
+        if fitted_damping[joint]:
+            damping_sigma[joint] = relative_sigma[1]
+
+        proximity = np.minimum(solution.x - lower, upper - solution.x)
+        hit = proximity <= 1e-3 * (upper - lower)
+        if hit[0]:
+            bound_hits.append(f"joint{joint + 1}_frictionloss")
+        if fitted_damping[joint] and hit[1]:
+            bound_hits.append(f"joint{joint + 1}_damping")
+
+    return CandidateClassicalFit(
+        linear=LinearFrictionFit(
+            frictionloss=frictionloss,
+            damping=damping,
+            condition_number=condition,
+            frictionloss_sigma_percent=friction_sigma,
+            damping_sigma_percent=damping_sigma,
+            samples=counts,
+            covariance_method="Newey-West HAC" if hac_lags else "HC1",
+            covariance_lags=hac_lags,
+        ),
+        fitted_damping=tuple(bool(value) for value in fitted_damping),
+        bound_hits=tuple(bound_hits),
     )

@@ -23,7 +23,11 @@ import numpy as np
 from mujoco import sysid
 from numpy.typing import NDArray
 
-from fer_mujoco_sysid.classical import LinearFrictionFit, fit_friction
+from fer_mujoco_sysid.classical import (
+    LinearFrictionFit,
+    fit_friction,
+    fit_friction_conditioned,
+)
 from fer_mujoco_sysid.diagnostics import ParameterQuality, parameter_quality
 from fer_mujoco_sysid.export import IdentifiedParameters
 from fer_mujoco_sysid.fitting import (
@@ -938,11 +942,66 @@ def fit_stages(
             "friction refit uncertainty rejected " + ", ".join(quality.rejected)
         )
 
+    # `linear` is the unconstrained regression, so a Stribeck joint lands on a
+    # negative viscous coefficient that MuJoCo silently clamps to zero at
+    # compile time — and the Coulomb term beside it was fitted *against* that
+    # illegal slope, so the pair is inconsistent by the time it reaches a
+    # rollout. The rollout stages already refuse those coordinates through
+    # `unsupported_damping`; the classical model is built here to the same
+    # rule. An unsupported joint holds the nominal viscous value and refits
+    # only its Coulomb term with that slope subtracted, which is a model the
+    # simulator can actually run.
+    # The rollout stages take this decision from `wide`, the combined
+    # friction+inertial estimate, because the extra speed range resolves a
+    # slope the cruises alone leave loose. The classical model is fitted only
+    # on cruise rows, so it asks the same question of the fit it is actually
+    # built from: a slope those rows cannot resolve is not one this model may
+    # carry. On the 2026-07-30 campaign that holds joints 1, 2, 5, 6 and 7 at
+    # nominal, and the result beats nominal at every horizon on both holdouts.
+    classical_unsupported = unsupported_damping(linear)
+    classical_linear = linear
+    classical_bound_hits: tuple[str, ...] = ()
+    if any(classical_unsupported):
+        nominal_damping = np.array(
+            [
+                float(nominal.dof_damping[int(nominal.joint(name).dofadr[0])])
+                for name in HYDRAX_ARM_JOINT_NAMES
+            ]
+        )
+        conditioned = fit_friction_conditioned(
+            nominal,
+            q,
+            dq,
+            ddq,
+            tau,
+            damping_reference_Nm_s=nominal_damping,
+            fit_damping=np.array(
+                [not frozen for frozen in classical_unsupported], dtype=np.bool_
+            ),
+        )
+        classical_linear = conditioned.linear
+        classical_bound_hits = conditioned.bound_hits
+        held = ", ".join(
+            f"joint{joint + 1}"
+            for joint, frozen in enumerate(classical_unsupported)
+            if frozen
+        )
+        problems.append(
+            "classical friction: the cruise data does not support a viscous "
+            f"term on {held}; damping held at the nominal value and the "
+            "Coulomb term refitted against it"
+        )
+        if classical_bound_hits:
+            problems.append(
+                "classical friction: parameters hit a box bound: "
+                + ", ".join(classical_bound_hits)
+            )
+
     classical_spec = fitting_spec(model_path)
     _apply_joint_values(
         classical_spec,
-        frictionloss=linear.frictionloss,
-        damping=linear.damping,
+        frictionloss=classical_linear.frictionloss,
+        damping=classical_linear.damping,
     )
     classical = classical_spec.compile()
     parameters = IdentifiedParameters.from_model(
