@@ -26,10 +26,6 @@ def test_nominal_model_files_match_reviewed_sources(model_paths: ModelPaths) -> 
     assert contract["contract_version"] == 1
     sources = contract["models"]
     assert _sha256(model_paths.hydrax) == sources["hydrax"]["sha256"]
-    # The deployment target is optional: it belongs to a consumer repository
-    # that this project must work without. Check it only when it is there.
-    if model_paths.has_ros_overlay:
-        assert _sha256(model_paths.ros_overlay) == sources["sbmpc_ros"]["sha256"]
 
 
 def test_the_project_works_without_a_consumer_checkout(

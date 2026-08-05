@@ -31,16 +31,29 @@ ROS_MODEL_ENV = "FER_SYSID_SBMPC_ROS_MODEL"
 WORKSPACE_ENV = "FER_SYSID_WORKSPACE_ROOT"
 
 
+#: The vendored nominal model. Identification measures deviations *from* this
+#: file, so it cannot live in a repository that also receives the identified
+#: parameters: writing a fit into hydrax's panda.xml previously moved the very
+#: baseline the fit is defined against, and every recorded campaign — which
+#: binds the baseline's sha256 — stopped being loadable. It is a copy of
+#: hydrax at the revision pinned in contracts/nominal_sources.toml, and it
+#: changes only by explicit review.
+VENDORED_NOMINAL_MODEL = (
+    Path(__file__).resolve().parents[2] / "models" / "panda" / "panda.xml"
+)
+
+
 @dataclass(frozen=True)
 class ModelPaths:
-    """Locations of the read-only source MJCFs.
+    """Locations of the nominal model and the optional deployment target.
 
-    Only ``hydrax`` is required: it is the nominal model this project
-    identifies, generates protocols against, and simulates. ``ros_overlay``
-    is a *deployment target* — a consumer's MJCF that the identified
-    parameters will eventually be rendered into — and everything here works
-    without it. Nothing in the identification or playback path may depend on
-    a consumer repository being checked out.
+    ``hydrax`` is the nominal model this project identifies, generates
+    protocols against, and simulates; it defaults to the vendored copy so
+    identification never depends on a sibling checkout. ``ros_overlay`` is a
+    *deployment target* — a consumer's MJCF that the identified parameters
+    will eventually be rendered into — and everything here works without it.
+    Nothing in the identification or playback path may depend on a consumer
+    repository being checked out.
     """
 
     hydrax: Path
@@ -84,11 +97,11 @@ def resolve_model_paths(workspace_root: str | Path | None = None) -> ModelPaths:
         workspace_root = Path(__file__).resolve().parents[3]
     workspace = _resolved_path(workspace_root)
 
+    # The vendored copy is the default. A sibling hydrax checkout is a
+    # deployment target, not the baseline: overriding this to point back at it
+    # re-couples the fit to a file the fit's own output gets written into.
     hydrax = _resolved_path(
-        os.environ.get(
-            HYDRAX_MODEL_ENV,
-            workspace / "hydrax" / "hydrax" / "models" / "panda" / "panda.xml",
-        )
+        os.environ.get(HYDRAX_MODEL_ENV, VENDORED_NOMINAL_MODEL)
     )
     ros_overlay = _resolved_path(
         os.environ.get(
